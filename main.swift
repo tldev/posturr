@@ -3,24 +3,6 @@ import AVFoundation
 import Vision
 import CoreImage
 
-// MARK: - Dynamic Private API Loading
-// Use dlsym for private CoreGraphics APIs to avoid dyld failures on newer macOS versions
-private let cgsMainConnectionID: (@convention(c) () -> UInt32)? = {
-    guard let handle = dlopen(nil, RTLD_LAZY) else { return nil }
-    guard let sym = dlsym(handle, "CGSMainConnectionID") else { return nil }
-    return unsafeBitCast(sym, to: (@convention(c) () -> UInt32).self)
-}()
-
-private let cgsSetWindowBackgroundBlurRadius: (@convention(c) (UInt32, UInt32, Int32) -> Int32)? = {
-    guard let handle = dlopen(nil, RTLD_LAZY) else { return nil }
-    guard let sym = dlsym(handle, "CGSSetWindowBackgroundBlurRadius") else { return nil }
-    return unsafeBitCast(sym, to: (@convention(c) (UInt32, UInt32, Int32) -> Int32).self)
-}()
-
-private var privateAPIsAvailable: Bool {
-    return cgsMainConnectionID != nil && cgsSetWindowBackgroundBlurRadius != nil
-}
-
 // MARK: - Calibration View
 class CalibrationView: NSView {
     var targetPosition: NSPoint = .zero
@@ -318,6 +300,7 @@ class CalibrationWindowController: NSObject {
 // MARK: - App Delegate
 class AppDelegate: NSObject, NSApplicationDelegate {
     var windows: [NSWindow] = []
+    var blurViews: [NSVisualEffectView] = []
     var statusItem: NSStatusItem!
     var statusMenuItem: NSMenuItem!
     var enabledMenuItem: NSMenuItem!
@@ -623,12 +606,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
             window.ignoresMouseEvents = true
             window.hasShadow = false
-            let blurView = NSView(frame: NSRect(origin: .zero, size: screen.frame.size))
-            blurView.wantsLayer = true
-            blurView.layer?.backgroundColor = .clear
+            
+            // Use NSVisualEffectView for reliable blur effect
+            let blurView = NSVisualEffectView(frame: NSRect(origin: .zero, size: screen.frame.size))
+            blurView.blendingMode = .behindWindow
+            blurView.material = .fullScreenUI
+            blurView.state = .active
+            blurView.alphaValue = 0  // Start invisible
+            
             window.contentView = blurView
             window.orderFrontRegardless()
             windows.append(window)
+            blurViews.append(blurView)
         }
     }
 
@@ -642,19 +631,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             currentBlurRadius = max(currentBlurRadius - 3, targetBlurRadius)
         }
 
-        // Use private APIs if available, otherwise fall back to alpha overlay
-        if let getConnectionID = cgsMainConnectionID,
-           let setBlurRadius = cgsSetWindowBackgroundBlurRadius {
-            let cid = getConnectionID()
-            for window in windows {
-                _ = setBlurRadius(cid, UInt32(window.windowNumber), currentBlurRadius)
-            }
-        } else {
-            // Fallback: use semi-transparent overlay instead of blur
-            let alpha = CGFloat(currentBlurRadius) / 64.0 * 0.7
-            for window in windows {
-                window.backgroundColor = NSColor.black.withAlphaComponent(alpha)
-            }
+        // Control blur via NSVisualEffectView alphaValue
+        let alpha = CGFloat(currentBlurRadius) / 64.0
+        for blurView in blurViews {
+            blurView.alphaValue = alpha
         }
     }
 
