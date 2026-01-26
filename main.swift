@@ -354,12 +354,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var sensitivity: CGFloat = 0.85  // Medium
     var deadZone: CGFloat = 0.03     // Medium
     var useCompatibilityMode = false
+    var blurWhenAway = false
+    var blurWhenAwayMenuItem: NSMenuItem!
 
     // Detection state
     var lastDetectionTime = Date()
     var consecutiveBadFrames = 0
     var consecutiveGoodFrames = 0
+    var consecutiveNoDetectionFrames = 0
     let frameThreshold = 8  // Require more consecutive frames
+    let awayFrameThreshold = 15  // Frames before "away" blur kicks in
 
     // Smoothing for nose position (reduces flicker)
     var noseYHistory: [CGFloat] = []
@@ -537,6 +541,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(NSMenuItem.separator())
 
+        // Blur When Away toggle
+        blurWhenAwayMenuItem = NSMenuItem(title: "Blur When Away", action: #selector(toggleBlurWhenAway), keyEquivalent: "")
+        blurWhenAwayMenuItem.target = self
+        blurWhenAwayMenuItem.state = blurWhenAway ? .on : .off
+        menu.addItem(blurWhenAwayMenuItem)
+
+        menu.addItem(NSMenuItem.separator())
+
         #if !APP_STORE
         // Compatibility Mode (only shown in direct download builds with private API support)
         compatibilityModeMenuItem = NSMenuItem(title: "Compatibility Mode", action: #selector(toggleCompatibilityMode), keyEquivalent: "")
@@ -581,6 +593,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             statusMenuItem.title = "Status: Monitoring..."
             captureSession?.startRunning()
+        }
+    }
+
+    @objc func toggleBlurWhenAway() {
+        blurWhenAway.toggle()
+        blurWhenAwayMenuItem.state = blurWhenAway ? .on : .off
+
+        if !blurWhenAway {
+            // Reset no-detection state when disabled
+            consecutiveNoDetectionFrames = 0
         }
     }
 
@@ -904,6 +926,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
+        // Reset away counter - we can see the user
+        consecutiveNoDetectionFrames = 0
+
         let noseY = nose.location.y
         currentNoseY = noseY
 
@@ -924,13 +949,40 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let faceRequest = VNDetectFaceRectanglesRequest { [weak self] request, error in
             if let results = request.results as? [VNFaceObservation], let face = results.first {
                 self?.analyzeFace(face)
+            } else {
+                self?.handleNoDetection()
             }
         }
 
         try? handler.perform([faceRequest])
     }
 
+    func handleNoDetection() {
+        // Reset detection counters since we can't see the user
+        consecutiveNoDetectionFrames += 1
+        consecutiveBadFrames = 0
+        consecutiveGoodFrames = 0
+
+        guard isEnabled && isCalibrated && blurWhenAway else {
+            consecutiveNoDetectionFrames = 0
+            return
+        }
+
+        if consecutiveNoDetectionFrames >= awayFrameThreshold {
+            // User is away - apply full blur for privacy
+            targetBlurRadius = 64
+
+            DispatchQueue.main.async {
+                self.statusMenuItem.title = "Status: Away"
+                self.statusItem.button?.image = NSImage(systemSymbolName: "figure.walk", accessibilityDescription: "Away")
+            }
+        }
+    }
+
     func analyzeFace(_ face: VNFaceObservation) {
+        // Reset away counter - we can see the user
+        consecutiveNoDetectionFrames = 0
+
         let faceY = face.boundingBox.midY
         currentNoseY = faceY
 
