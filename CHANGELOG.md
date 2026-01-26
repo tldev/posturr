@@ -5,11 +5,23 @@ All notable changes to Posturr will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-01-26
+
+### Added
+- Analytics dashboard with posture statistics (Menu → Statistics)
+- Daily posture score with visual ring chart
+- 7-day trend bar chart showing improvement over time
+- Detailed metrics: monitoring time, slouch duration, slouch count
+- Persistent storage preserves history across app restarts
+
+### Acknowledgments
+- Thanks to [@javabudd](https://github.com/javabudd) for this contribution!
+
 ## [1.3.0] - 2026-01-26
 
 ### Added
-- Configurable blur onset delay (0-30 seconds) - grace period before blur activates
-- Allows brief glances at keyboard without triggering blur
+- Configurable warning onset delay (0-30 seconds) - grace period before warning activates
+- Allows brief glances at keyboard without triggering warning
 
 ### Acknowledgments
 - Thanks to [@gcanyon](https://github.com/gcanyon) for suggesting this feature!
