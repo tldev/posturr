@@ -2,6 +2,7 @@ import AppKit
 import AVFoundation
 import Vision
 import CoreImage
+import CoreGraphics
 
 // MARK: - Dynamic Private API Loading
 // Private CoreGraphics APIs for enhanced blur effect (not available in App Store builds)
@@ -25,6 +26,48 @@ private var privateAPIsAvailable: Bool {
 // App Store build: no private APIs available
 private var privateAPIsAvailable: Bool { return false }
 #endif
+
+// MARK: - Settings Keys
+enum SettingsKeys {
+    static let sensitivity = "sensitivity"
+    static let deadZone = "deadZone"
+    static let useCompatibilityMode = "useCompatibilityMode"
+    static let blurWhenAway = "blurWhenAway"
+    static let pauseOnTheGo = "pauseOnTheGo"
+    static let lastCameraID = "lastCameraID"
+    static let profiles = "profiles"
+}
+
+// MARK: - Profile Data
+struct ProfileData: Codable {
+    let goodPostureY: CGFloat
+    let badPostureY: CGFloat
+    let neutralY: CGFloat
+    let postureRange: CGFloat
+    let cameraID: String
+}
+
+// MARK: - Pause Reason
+enum PauseReason: Equatable {
+    case noProfile
+    case onTheGo
+    case cameraDisconnected
+}
+
+// MARK: - App State
+enum AppState: Equatable {
+    case disabled
+    case calibrating
+    case monitoring
+    case paused(PauseReason)
+
+    var isActive: Bool {
+        switch self {
+        case .monitoring, .calibrating: return true
+        case .disabled, .paused: return false
+        }
+    }
+}
 
 // MARK: - Calibration View
 class CalibrationView: NSView {
@@ -327,6 +370,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var statusItem: NSStatusItem!
     var statusMenuItem: NSMenuItem!
     var enabledMenuItem: NSMenuItem!
+    var recalibrateMenuItem: NSMenuItem!
     var compatibilityModeMenuItem: NSMenuItem!
 
     // Posture tracking
@@ -334,14 +378,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var videoOutput: AVCaptureVideoDataOutput?
     var currentBlurRadius: Int32 = 0
     var targetBlurRadius: Int32 = 0
-    var isEnabled = true
     let captureQueue = DispatchQueue(label: "capture.queue")
     var selectedCameraID: String?  // nil = auto-select
     var cameraMenuItem: NSMenuItem!
 
     // Calibration
     var calibrationController: CalibrationWindowController?
-    var isCalibrating = false
     var isCalibrated = false
 
     // Calibration values (Y positions)
@@ -356,6 +398,129 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var useCompatibilityMode = false
     var blurWhenAway = false
     var blurWhenAwayMenuItem: NSMenuItem!
+    var pauseOnTheGo = false
+    var pauseOnTheGoMenuItem: NSMenuItem!
+
+    // MARK: - State Machine
+    // Single source of truth for app state - all UI derives from this
+    private var _state: AppState = .disabled
+    var state: AppState {
+        get { _state }
+        set {
+            guard newValue != _state else { return }
+            let oldState = _state
+            _state = newValue
+            handleStateTransition(from: oldState, to: newValue)
+        }
+    }
+
+    /// Central handler for all state transitions - updates ALL derived state
+    private func handleStateTransition(from oldState: AppState, to newState: AppState) {
+        print("[State] Transition: \(oldState) -> \(newState)")
+
+        // 1. Update camera state
+        syncCameraToState()
+
+        // 2. Update blur
+        if !newState.isActive {
+            targetBlurRadius = 0
+        }
+
+        // 3. Update all UI elements
+        syncUIToState()
+    }
+
+    /// Derives camera running state from app state
+    private func syncCameraToState() {
+        let shouldRun: Bool
+        switch state {
+        case .calibrating, .monitoring:
+            shouldRun = true
+        case .disabled, .paused:
+            shouldRun = false
+        }
+
+        print("[State] syncCameraToState: state=\(state), shouldRun=\(shouldRun), isRunning=\(captureSession?.isRunning ?? false)")
+
+        if shouldRun {
+            // Ensure camera input is configured before starting
+            ensureCameraInput()
+            let hasInputs = !(captureSession?.inputs.isEmpty ?? true)
+            print("[State] After ensureCameraInput: hasInputs=\(hasInputs)")
+
+            if !(captureSession?.isRunning ?? false) {
+                print("[State] Starting capture session...")
+                DispatchQueue.global(qos: .userInitiated).async {
+                    self.captureSession?.startRunning()
+                    DispatchQueue.main.async {
+                        print("[State] Capture session running: \(self.captureSession?.isRunning ?? false)")
+                    }
+                }
+            }
+        } else if captureSession?.isRunning ?? false {
+            print("[State] Stopping capture session")
+            captureSession?.stopRunning()
+        }
+    }
+
+    /// Derives ALL UI state from app state - single place for UI consistency
+    private func syncUIToState() {
+        // Status text and icon
+        switch state {
+        case .disabled:
+            statusMenuItem.title = "Status: Disabled"
+            statusItem.button?.image = NSImage(systemSymbolName: "figure.stand.line.dotted.figure.stand", accessibilityDescription: "Disabled")
+
+        case .calibrating:
+            statusMenuItem.title = "Status: Calibrating..."
+            statusItem.button?.image = NSImage(systemSymbolName: "figure.stand", accessibilityDescription: "Calibrating")
+
+        case .monitoring:
+            // Default monitoring state - will be overwritten by posture detection
+            if isCalibrated {
+                statusMenuItem.title = "Status: Good Posture"
+                statusItem.button?.image = NSImage(systemSymbolName: "figure.stand", accessibilityDescription: "Good Posture")
+            } else {
+                statusMenuItem.title = "Status: Starting..."
+                statusItem.button?.image = NSImage(systemSymbolName: "figure.stand", accessibilityDescription: "Posturr")
+            }
+
+        case .paused(let reason):
+            switch reason {
+            case .noProfile:
+                statusMenuItem.title = "Status: Calibration needed"
+            case .onTheGo:
+                statusMenuItem.title = "Status: Paused (on the go - recalibrate)"
+            case .cameraDisconnected:
+                statusMenuItem.title = "Status: Camera disconnected"
+            }
+            statusItem.button?.image = NSImage(systemSymbolName: "pause.circle", accessibilityDescription: "Paused")
+        }
+
+        // Enabled menu item
+        enabledMenuItem.state = (state != .disabled) ? .on : .off
+
+        // Recalibrate menu item
+        let cameras = getAvailableCameras()
+        let hasCamera = !cameras.isEmpty && (selectedCameraID == nil || cameras.contains { $0.uniqueID == selectedCameraID })
+        if hasCamera && state != .calibrating {
+            recalibrateMenuItem.title = "Recalibrate"
+            recalibrateMenuItem.action = #selector(recalibrate)
+            recalibrateMenuItem.isEnabled = true
+        } else {
+            recalibrateMenuItem.title = hasCamera ? "Recalibrate" : "Recalibrate (no camera)"
+            recalibrateMenuItem.action = nil
+            recalibrateMenuItem.isEnabled = false
+        }
+    }
+
+    // Display change handling
+    var displayReconfigurationPending = false
+    var displayDebounceTimer: Timer?
+
+    // Camera hot-plug observers
+    var cameraConnectedObserver: NSObjectProtocol?
+    var cameraDisconnectedObserver: NSObjectProtocol?
 
     // Detection state
     var lastDetectionTime = Date()
@@ -381,8 +546,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     let frameInterval: TimeInterval = 0.1  // 10fps
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        loadSettings()
         setupMenuBar()
         setupOverlayWindows()
+        registerDisplayChangeCallback()
+        registerCameraChangeNotifications()
 
         // Smooth blur transition timer (30fps is enough for smooth transitions)
         Timer.scheduledTimer(withTimeInterval: 0.033, repeats: true) { [weak self] _ in
@@ -426,6 +594,37 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         setupCamera()
 
+        // Check for existing profile first
+        let configKey = getCurrentConfigKey()
+        if let profile = loadProfile(forKey: configKey) {
+            // Check if profile's camera is available
+            let cameras = getAvailableCameras()
+            if cameras.contains(where: { $0.uniqueID == profile.cameraID }) {
+                // Camera available - use this profile
+                selectedCameraID = profile.cameraID
+                applyProfile(profile)
+
+                // Check for on-the-go pause
+                if pauseOnTheGo && isLaptopOnlyConfiguration() {
+                    state = .paused(.onTheGo)
+                } else {
+                    state = .monitoring
+                }
+                return
+            } else {
+                // Profile exists but camera not available
+                state = .paused(.cameraDisconnected)
+                return
+            }
+        }
+
+        // No profile - need calibration
+        // Check for on-the-go pause before calibration
+        if pauseOnTheGo && isLaptopOnlyConfiguration() {
+            state = .paused(.onTheGo)
+            return
+        }
+
         // Wait for camera to fully initialize before calibration
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
             self?.startCalibration()
@@ -442,9 +641,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func handleCameraDenied() {
+        state = .disabled
         statusMenuItem.title = "Status: Camera access denied"
-        isEnabled = false
-        enabledMenuItem.state = .off
 
         // Show alert
         let alert = NSAlert()
@@ -489,9 +687,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(enabledMenuItem)
 
         // Recalibrate
-        let recalibrateItem = NSMenuItem(title: "Recalibrate", action: #selector(recalibrate), keyEquivalent: "r")
-        recalibrateItem.target = self
-        menu.addItem(recalibrateItem)
+        recalibrateMenuItem = NSMenuItem(title: "Recalibrate", action: #selector(recalibrate), keyEquivalent: "r")
+        recalibrateMenuItem.target = self
+        menu.addItem(recalibrateMenuItem)
 
         // Camera submenu
         cameraMenuItem = NSMenuItem(title: "Camera", action: nil, keyEquivalent: "")
@@ -547,6 +745,26 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         blurWhenAwayMenuItem.state = blurWhenAway ? .on : .off
         menu.addItem(blurWhenAwayMenuItem)
 
+        // Pause on the Go toggle
+        pauseOnTheGoMenuItem = NSMenuItem(title: "Pause on the Go", action: #selector(togglePauseOnTheGo), keyEquivalent: "")
+        pauseOnTheGoMenuItem.target = self
+        pauseOnTheGoMenuItem.state = pauseOnTheGo ? .on : .off
+        menu.addItem(pauseOnTheGoMenuItem)
+
+        // Hint text for pause on the go
+        let baseFont = NSFont.systemFont(ofSize: 11, weight: .regular)
+        let italicFont = NSFontManager.shared.convert(baseFont, toHaveTrait: .italicFontMask)
+        let pauseHintItem = NSMenuItem()
+        pauseHintItem.attributedTitle = NSAttributedString(
+            string: "  Auto-pause when using laptop display only",
+            attributes: [
+                .font: italicFont,
+                .foregroundColor: NSColor.secondaryLabelColor
+            ]
+        )
+        pauseHintItem.isEnabled = false
+        menu.addItem(pauseHintItem)
+
         menu.addItem(NSMenuItem.separator())
 
         #if !APP_STORE
@@ -557,19 +775,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(compatibilityModeMenuItem)
 
         // Hint text for compatibility mode
-        let hintItem = NSMenuItem()
-        let baseFont = NSFont.systemFont(ofSize: 11, weight: .regular)
-        let italicFont = NSFontManager.shared.convert(baseFont, toHaveTrait: .italicFontMask)
-        let hintText = NSAttributedString(
+        let compatHintItem = NSMenuItem()
+        compatHintItem.attributedTitle = NSAttributedString(
             string: "  Enable if blur isn't appearing",
             attributes: [
                 .font: italicFont,
                 .foregroundColor: NSColor.secondaryLabelColor
             ]
         )
-        hintItem.attributedTitle = hintText
-        hintItem.isEnabled = false
-        menu.addItem(hintItem)
+        compatHintItem.isEnabled = false
+        menu.addItem(compatHintItem)
 
         menu.addItem(NSMenuItem.separator())
         #endif
@@ -583,26 +798,49 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func toggleEnabled() {
-        isEnabled.toggle()
-        enabledMenuItem.state = isEnabled ? .on : .off
-
-        if !isEnabled {
-            targetBlurRadius = 0
-            statusMenuItem.title = "Status: Disabled"
-            captureSession?.stopRunning()
+        if state == .disabled {
+            // Re-enable: check what state we should enter
+            if !isCalibrated {
+                state = .paused(.noProfile)
+            } else if pauseOnTheGo && isLaptopOnlyConfiguration() {
+                state = .paused(.onTheGo)
+            } else if !isCameraAvailable() {
+                state = .paused(.cameraDisconnected)
+            } else {
+                state = .monitoring
+            }
         } else {
-            statusMenuItem.title = "Status: Monitoring..."
-            captureSession?.startRunning()
+            state = .disabled
         }
+        saveSettings()
+    }
+
+    private func isCameraAvailable() -> Bool {
+        let cameras = getAvailableCameras()
+        return !cameras.isEmpty && (selectedCameraID == nil || cameras.contains { $0.uniqueID == selectedCameraID })
     }
 
     @objc func toggleBlurWhenAway() {
         blurWhenAway.toggle()
         blurWhenAwayMenuItem.state = blurWhenAway ? .on : .off
+        saveSettings()
 
         if !blurWhenAway {
             // Reset no-detection state when disabled
             consecutiveNoDetectionFrames = 0
+        }
+    }
+
+    @objc func togglePauseOnTheGo() {
+        pauseOnTheGo.toggle()
+        pauseOnTheGoMenuItem.state = pauseOnTheGo ? .on : .off
+        saveSettings()
+
+        // Don't immediately pause when enabling - only pause on transition to laptop-only
+        // But if we disabled it and we were paused for on-the-go, resume
+        if !pauseOnTheGo && state == .paused(.onTheGo) {
+            // If we disabled it and we were paused for on-the-go, resume
+            state = .monitoring
         }
     }
 
@@ -611,13 +849,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func startCalibration() {
-        guard !isCalibrating else { return }
+        guard state != .calibrating else {
+            print("[Calibration] Already calibrating, ignoring")
+            return
+        }
 
-        isCalibrating = true
+        print("[Calibration] Starting calibration, selectedCameraID: \(selectedCameraID ?? "nil")")
         isCalibrated = false
-        isEnabled = false
-        targetBlurRadius = 0
-        statusMenuItem.title = "Status: Calibrating..."
+        state = .calibrating
 
         calibrationController = CalibrationWindowController()
         calibrationController?.start(
@@ -636,6 +875,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
+        print("[Calibration] Finishing with \(values.count) values")
+
         // Find min and max Y values from all captured corners
         // Higher Y = looking up (good posture)
         // Lower Y = looking down (slouching)
@@ -648,32 +889,43 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         neutralY = avgY
         postureRange = abs(maxY - minY)
 
-        isCalibrated = true
-        isCalibrating = false
-        isEnabled = true
-        enabledMenuItem.state = .on
+        // Save profile for this display configuration
+        let profile = ProfileData(
+            goodPostureY: goodPostureY,
+            badPostureY: badPostureY,
+            neutralY: neutralY,
+            postureRange: postureRange,
+            cameraID: selectedCameraID ?? ""
+        )
+        let configKey = getCurrentConfigKey()
+        print("[Calibration] Saving profile for config: \(configKey), camera: \(selectedCameraID ?? "nil")")
+        saveProfile(forKey: configKey, data: profile)
 
-        statusMenuItem.title = "Status: Calibrated"
+        isCalibrated = true
         calibrationController = nil
 
         // Reset counters
         consecutiveBadFrames = 0
         consecutiveGoodFrames = 0
+
+        // Transition to monitoring
+        print("[Calibration] Complete, transitioning to monitoring")
+        state = .monitoring
     }
 
     func cancelCalibration() {
-        isCalibrating = false
-        isEnabled = true
-        enabledMenuItem.state = .on
-        statusMenuItem.title = "Status: Using defaults"
         calibrationController = nil
 
         // Use sensible defaults
         isCalibrated = true
+
+        // Transition to monitoring with defaults
+        state = .monitoring
     }
 
     @objc func setSensitivity(_ sender: NSMenuItem) {
         sensitivity = CGFloat(sender.tag) / 100.0
+        saveSettings()
 
         if let menu = sender.menu {
             for item in menu.items {
@@ -684,6 +936,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func setDeadZone(_ sender: NSMenuItem) {
         deadZone = CGFloat(sender.tag) / 1000.0
+        saveSettings()
 
         if let menu = sender.menu {
             for item in menu.items {
@@ -725,7 +978,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func selectCamera(_ sender: NSMenuItem) {
         guard let cameraID = sender.representedObject as? String else { return }
+
+        print("[Camera] User selected camera: \(cameraID)")
+
+        // If same camera, do nothing
+        if cameraID == selectedCameraID {
+            print("[Camera] Same camera selected, ignoring")
+            return
+        }
+
         selectedCameraID = cameraID
+        saveSettings()
 
         // Update menu checkmarks
         if let menu = sender.menu {
@@ -734,12 +997,27 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        // Restart camera with new selection
+        // Camera changed - must recalibrate
+        print("[Camera] Camera changed, calling restartCamera")
         restartCamera()
     }
 
     func restartCamera() {
-        captureSession?.stopRunning()
+        switchCameraInput()
+
+        // Camera changed by user - require recalibration
+        state = .paused(.noProfile)
+    }
+
+    /// Switches camera input without changing state (used for profile-based switching)
+    /// Configures the capture session input for the selected camera (doesn't affect running state)
+    private func switchCameraInput() {
+        let wasRunning = captureSession?.isRunning ?? false
+        print("[Camera] switchCameraInput called, wasRunning=\(wasRunning), selectedCameraID=\(selectedCameraID ?? "nil")")
+
+        if wasRunning {
+            captureSession?.stopRunning()
+        }
 
         // Remove existing input
         if let inputs = captureSession?.inputs {
@@ -750,28 +1028,59 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Find and add new camera
         let cameras = getAvailableCameras()
+        print("[Camera] Available cameras: \(cameras.map { $0.localizedName })")
         let camera = cameras.first { $0.uniqueID == selectedCameraID } ?? cameras.first
 
-        guard let selectedCamera = camera,
-              let input = try? AVCaptureDeviceInput(device: selectedCamera) else {
-            statusMenuItem.title = "Status: Camera Error"
+        guard let selectedCamera = camera else {
+            print("[Camera] ERROR: No camera found!")
             return
         }
 
-        captureSession?.addInput(input)
-        statusMenuItem.title = "Status: Monitoring..."
-
-        DispatchQueue.global(qos: .userInitiated).async {
-            self.captureSession?.startRunning()
+        do {
+            let input = try AVCaptureDeviceInput(device: selectedCamera)
+            selectedCameraID = selectedCamera.uniqueID
+            captureSession?.addInput(input)
+            print("[Camera] Successfully added input for \(selectedCamera.localizedName)")
+        } catch {
+            print("[Camera] ERROR: Failed to create input: \(error)")
+            return
         }
 
-        // Trigger recalibration with new camera
-        startCalibration()
+        // Restore running state
+        if wasRunning {
+            DispatchQueue.global(qos: .userInitiated).async {
+                self.captureSession?.startRunning()
+                print("[Camera] Restarted session after input switch")
+            }
+        }
+    }
+
+    /// Ensures capture session has a valid input for the current camera selection
+    private func ensureCameraInput() {
+        guard let session = captureSession else {
+            print("[Camera] ensureCameraInput: No capture session!")
+            return
+        }
+
+        // Check if we already have the right input
+        if let currentInput = session.inputs.first as? AVCaptureDeviceInput {
+            if currentInput.device.uniqueID == selectedCameraID {
+                print("[Camera] ensureCameraInput: Already have correct input")
+                return  // Already configured correctly
+            }
+            print("[Camera] ensureCameraInput: Have input for \(currentInput.device.uniqueID), but need \(selectedCameraID ?? "nil")")
+        } else {
+            print("[Camera] ensureCameraInput: No current input, need to configure")
+        }
+
+        // Need to reconfigure
+        switchCameraInput()
     }
 
     @objc func toggleCompatibilityMode() {
         useCompatibilityMode.toggle()
         compatibilityModeMenuItem.state = useCompatibilityMode ? .on : .off
+        saveSettings()
 
         // Reset blur state when switching modes
         currentBlurRadius = 0
@@ -793,6 +1102,207 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func quit() {
         captureSession?.stopRunning()
         NSApplication.shared.terminate(nil)
+    }
+
+    // MARK: - Persistence
+
+    func saveSettings() {
+        let defaults = UserDefaults.standard
+        defaults.set(sensitivity, forKey: SettingsKeys.sensitivity)
+        defaults.set(deadZone, forKey: SettingsKeys.deadZone)
+        defaults.set(useCompatibilityMode, forKey: SettingsKeys.useCompatibilityMode)
+        defaults.set(blurWhenAway, forKey: SettingsKeys.blurWhenAway)
+        defaults.set(pauseOnTheGo, forKey: SettingsKeys.pauseOnTheGo)
+        if let cameraID = selectedCameraID {
+            defaults.set(cameraID, forKey: SettingsKeys.lastCameraID)
+        }
+    }
+
+    func loadSettings() {
+        let defaults = UserDefaults.standard
+
+        if defaults.object(forKey: SettingsKeys.sensitivity) != nil {
+            sensitivity = defaults.double(forKey: SettingsKeys.sensitivity)
+        }
+        if defaults.object(forKey: SettingsKeys.deadZone) != nil {
+            deadZone = defaults.double(forKey: SettingsKeys.deadZone)
+        }
+        useCompatibilityMode = defaults.bool(forKey: SettingsKeys.useCompatibilityMode)
+        blurWhenAway = defaults.bool(forKey: SettingsKeys.blurWhenAway)
+        pauseOnTheGo = defaults.bool(forKey: SettingsKeys.pauseOnTheGo)
+        selectedCameraID = defaults.string(forKey: SettingsKeys.lastCameraID)
+    }
+
+    func saveProfile(forKey key: String, data: ProfileData) {
+        let defaults = UserDefaults.standard
+        var profiles = defaults.dictionary(forKey: SettingsKeys.profiles) as? [String: Data] ?? [:]
+
+        if let encoded = try? JSONEncoder().encode(data) {
+            profiles[key] = encoded
+            defaults.set(profiles, forKey: SettingsKeys.profiles)
+        }
+    }
+
+    func loadProfile(forKey key: String) -> ProfileData? {
+        let defaults = UserDefaults.standard
+        guard let profiles = defaults.dictionary(forKey: SettingsKeys.profiles) as? [String: Data],
+              let data = profiles[key] else {
+            return nil
+        }
+
+        return try? JSONDecoder().decode(ProfileData.self, from: data)
+    }
+
+    func deleteProfile(forKey key: String) {
+        let defaults = UserDefaults.standard
+        var profiles = defaults.dictionary(forKey: SettingsKeys.profiles) as? [String: Data] ?? [:]
+        profiles.removeValue(forKey: key)
+        defaults.set(profiles, forKey: SettingsKeys.profiles)
+    }
+
+    // MARK: - Display Configuration
+
+    func getDisplayUUIDs() -> [String] {
+        var uuids: [String] = []
+
+        for screen in NSScreen.screens {
+            guard let screenNumber = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID else {
+                continue
+            }
+
+            if let uuid = CGDisplayCreateUUIDFromDisplayID(screenNumber)?.takeRetainedValue() {
+                let uuidString = CFUUIDCreateString(nil, uuid) as String
+                uuids.append(uuidString)
+            }
+        }
+
+        return uuids.sorted()
+    }
+
+    func buildConfigKey(displayUUIDs: [String]) -> String {
+        return "displays:\(displayUUIDs.joined(separator: "+"))"
+    }
+
+    func getCurrentConfigKey() -> String {
+        let displays = getDisplayUUIDs()
+        return buildConfigKey(displayUUIDs: displays)
+    }
+
+    func isLaptopOnlyConfiguration() -> Bool {
+        let screens = NSScreen.screens
+        if screens.count != 1 { return false }
+
+        guard let screen = screens.first,
+              let displayID = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID else {
+            return false
+        }
+
+        return CGDisplayIsBuiltin(displayID) != 0
+    }
+
+    func registerDisplayChangeCallback() {
+        let callback: CGDisplayReconfigurationCallBack = { displayID, flags, userInfo in
+            guard let userInfo = userInfo else { return }
+            let appDelegate = Unmanaged<AppDelegate>.fromOpaque(userInfo).takeUnretainedValue()
+
+            // Only handle when reconfiguration completes
+            if flags.contains(.beginConfigurationFlag) {
+                return
+            }
+
+            appDelegate.scheduleDisplayConfigurationChange()
+        }
+
+        let userInfo = Unmanaged.passUnretained(self).toOpaque()
+        CGDisplayRegisterReconfigurationCallback(callback, userInfo)
+    }
+
+    func scheduleDisplayConfigurationChange() {
+        // Debounce - displays often send multiple events
+        DispatchQueue.main.async { [weak self] in
+            self?.displayDebounceTimer?.invalidate()
+            self?.displayDebounceTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { [weak self] _ in
+                self?.handleDisplayConfigurationChange()
+            }
+        }
+    }
+
+    func handleDisplayConfigurationChange() {
+        print("[Display] Configuration changed, rebuilding overlay windows")
+        // Rebuild overlay windows for new screen configuration
+        rebuildOverlayWindows()
+
+        // Don't change state if disabled
+        guard state != .disabled else {
+            print("[Display] App is disabled, skipping state change")
+            return
+        }
+
+        // Check for on-the-go pause first
+        if pauseOnTheGo && isLaptopOnlyConfiguration() {
+            print("[Display] Laptop-only + pauseOnTheGo enabled, pausing")
+            state = .paused(.onTheGo)
+            return
+        }
+
+        // Get available cameras and current config
+        let cameras = getAvailableCameras()
+        let configKey = getCurrentConfigKey()
+        let profile = loadProfile(forKey: configKey)
+
+        print("[Display] Config key: \(configKey)")
+        print("[Display] Available cameras: \(cameras.map { "\($0.localizedName) (\($0.uniqueID))" })")
+        print("[Display] Profile exists: \(profile != nil), profile cameraID: \(profile?.cameraID ?? "none")")
+
+        // No cameras at all - truly disconnected
+        if cameras.isEmpty {
+            print("[Display] No cameras available")
+            state = .paused(.cameraDisconnected)
+            return
+        }
+
+        // Check if we have a profile with a matching camera
+        if let profile = profile,
+           cameras.contains(where: { $0.uniqueID == profile.cameraID }) {
+            // Profile's camera is available - use it
+            print("[Display] Found profile with matching camera")
+            if selectedCameraID != profile.cameraID {
+                print("[Display] Switching to profile camera: \(profile.cameraID)")
+                selectedCameraID = profile.cameraID
+                switchCameraInput()
+            }
+            applyProfile(profile)
+            updateCameraMenu()
+            state = .monitoring
+        } else {
+            // Either no profile, or profile's camera isn't available
+            // (but other cameras are) - need to calibrate for this config
+            print("[Display] No matching profile, need calibration")
+            updateCameraMenu()
+            state = .paused(.noProfile)
+        }
+    }
+
+    func rebuildOverlayWindows() {
+        // Remove old windows
+        for window in windows {
+            window.orderOut(nil)
+        }
+        windows.removeAll()
+        blurViews.removeAll()
+
+        // Create new windows for current screens
+        setupOverlayWindows()
+    }
+
+    // MARK: - Profile Management
+
+    func applyProfile(_ profile: ProfileData) {
+        goodPostureY = profile.goodPostureY
+        badPostureY = profile.badPostureY
+        neutralY = profile.neutralY
+        postureRange = profile.postureRange
+        isCalibrated = true
     }
 
     func setupOverlayWindows() {
@@ -906,6 +1416,96 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    // MARK: - Camera Hot-Plug Detection
+
+    func registerCameraChangeNotifications() {
+        cameraConnectedObserver = NotificationCenter.default.addObserver(
+            forName: NSNotification.Name.AVCaptureDeviceWasConnected,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            self?.handleCameraConnected(notification)
+        }
+
+        cameraDisconnectedObserver = NotificationCenter.default.addObserver(
+            forName: NSNotification.Name.AVCaptureDeviceWasDisconnected,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            self?.handleCameraDisconnected(notification)
+        }
+    }
+
+    func handleCameraConnected(_ notification: Notification) {
+        // Refresh camera menu with new device
+        updateCameraMenu()
+        syncUIToState()  // Update recalibrate menu item
+
+        // If we're paused, check if this camera helps us
+        guard let device = notification.object as? AVCaptureDevice,
+              device.hasMediaType(.video),
+              case .paused(let reason) = state else { return }
+
+        let configKey = getCurrentConfigKey()
+        if let profile = loadProfile(forKey: configKey),
+           profile.cameraID == device.uniqueID {
+            // The camera we need just connected - resume
+            selectedCameraID = profile.cameraID
+            applyProfile(profile)
+            switchCameraInput()
+            state = .monitoring
+        } else if reason == .cameraDisconnected {
+            // A camera connected but it's not the profile's camera
+            // Now we have cameras available, so user can recalibrate
+            state = .paused(.noProfile)
+        }
+    }
+
+    func handleCameraDisconnected(_ notification: Notification) {
+        guard let device = notification.object as? AVCaptureDevice,
+              device.hasMediaType(.video) else { return }
+
+        print("[Camera] Disconnected: \(device.localizedName) (ID: \(device.uniqueID))")
+        print("[Camera] Selected camera was: \(selectedCameraID ?? "nil")")
+
+        // Check if disconnected camera was the selected one
+        guard device.uniqueID == selectedCameraID else {
+            // Not our camera - just refresh menu
+            print("[Camera] Not our selected camera, just refreshing menu")
+            updateCameraMenu()
+            syncUIToState()
+            return
+        }
+
+        // Our selected camera was unplugged
+        let cameras = getAvailableCameras()
+        print("[Camera] Remaining cameras: \(cameras.map { "\($0.localizedName) (\($0.uniqueID))" })")
+
+        if let fallbackCamera = cameras.first {
+            // Auto-select another available camera
+            selectedCameraID = fallbackCamera.uniqueID
+            print("[Camera] Auto-selecting fallback: \(fallbackCamera.localizedName)")
+            switchCameraInput()
+            updateCameraMenu()
+
+            // Check if we have a profile for current display config that uses this camera
+            let configKey = getCurrentConfigKey()
+            if let profile = loadProfile(forKey: configKey), profile.cameraID == fallbackCamera.uniqueID {
+                print("[Camera] Found matching profile for fallback camera, resuming monitoring")
+                applyProfile(profile)
+                state = .monitoring
+            } else {
+                print("[Camera] No matching profile for fallback camera, need recalibration")
+                state = .paused(.noProfile)
+            }
+        } else {
+            // No cameras left
+            print("[Camera] No cameras remaining!")
+            updateCameraMenu()
+            state = .paused(.cameraDisconnected)
+        }
+    }
+
     func processFrame(_ pixelBuffer: CVPixelBuffer) {
         let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: .up, options: [:])
 
@@ -936,12 +1536,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         currentNoseY = noseY
 
         // Update calibration controller if active
-        if isCalibrating {
+        if state == .calibrating {
             calibrationController?.updateCurrentNoseY(noseY)
             return
         }
 
-        guard isEnabled && isCalibrated else { return }
+        guard state == .monitoring && isCalibrated else { return }
 
         evaluatePosture(currentY: noseY)
     }
@@ -966,7 +1566,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         consecutiveBadFrames = 0
         consecutiveGoodFrames = 0
 
-        guard isEnabled && isCalibrated && blurWhenAway else {
+        guard state == .monitoring && isCalibrated && blurWhenAway else {
             consecutiveNoDetectionFrames = 0
             return
         }
@@ -990,12 +1590,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         currentNoseY = faceY
 
         // Update calibration controller if active
-        if isCalibrating {
+        if state == .calibrating {
             calibrationController?.updateCurrentNoseY(faceY)
             return
         }
 
-        guard isEnabled && isCalibrated else { return }
+        guard state == .monitoring && isCalibrated else { return }
 
         evaluatePosture(currentY: faceY)
     }
