@@ -258,7 +258,7 @@ struct SettingsView: View {
                     }
                 }
 
-                GroupBoxWithInfo("Blur Delay", helpText: "Grace period before blur activates. Allows brief glances at keyboard without triggering blur.") {
+                GroupBoxWithInfo("Warning Delay", helpText: "Grace period before warning activates. Allows brief glances at keyboard without triggering the warning.") {
                     VStack(alignment: .leading, spacing: 8) {
                         Slider(value: $blurOnsetDelay, in: 0...30, step: 1)
                             .onChange(of: blurOnsetDelay) { newValue in
