@@ -110,6 +110,15 @@ After upload:
 - `./build.sh --appstore` - App Store build without private APIs
 - `./build.sh --release` - Regular build + creates ZIP archive
 
+## Installing During Development
+
+**Always kill the existing process and remove old app before installing:**
+```bash
+pkill -x Posturr; rm -rf /Applications/Posturr.app && cp -r build/Posturr.app /Applications/
+```
+
+This prevents file locking issues and permission errors from code signing.
+
 ## Version Bumping
 
 Update version in `build.sh` (VERSION variable) before releasing.
