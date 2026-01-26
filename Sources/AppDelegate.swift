@@ -1116,7 +1116,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 // pow(severity, 1/intensity): intensity 2.0 = aggressive, 0.5 = gentle
                 let adjustedSeverity = pow(severity, 1.0 / intensity)
 
-                let blurIntensity = Int32(2 + adjustedSeverity * 62)
+                let blurIntensity = Int32(adjustedSeverity * 64)
                 targetBlurRadius = min(64, blurIntensity)
 
                 DispatchQueue.main.async {

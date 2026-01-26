@@ -151,10 +151,10 @@ struct SettingsView: View {
     @State private var warningMode: WarningMode = .blur
     @State private var warningColor: Color = Color(WarningDefaults.color)
 
-    let intensityValues: [Double] = [0.5, 0.75, 1.0, 1.5, 2.0]
+    let intensityValues: [Double] = [0.08, 0.15, 0.35, 0.65, 1.2]
     let intensityLabels = ["Gentle", "Easy", "Medium", "Firm", "Aggressive"]
 
-    let deadZoneValues: [Double] = [0.01, 0.02, 0.03, 0.05, 0.08]
+    let deadZoneValues: [Double] = [0.0, 0.08, 0.15, 0.25, 0.40]
     let deadZoneLabels = ["Strict", "Tight", "Medium", "Relaxed", "Loose"]
 
     var body: some View {

@@ -349,8 +349,8 @@ class WarningOverlayManager {
         if currentIntensity < targetIntensity {
             currentIntensity = min(currentIntensity + step, targetIntensity)
         } else if currentIntensity > targetIntensity {
-            // Faster recovery
-            currentIntensity = max(currentIntensity - step * 2, targetIntensity)
+            // Near-instant recovery - clear immediately when posture is good
+            currentIntensity = max(currentIntensity - 0.5, targetIntensity)
         }
 
         for view in overlayViews {

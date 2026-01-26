@@ -79,8 +79,8 @@ class BlurOverlayManager {
             // Slow ease-in: +1 per frame
             currentBlurRadius = min(currentBlurRadius + 1, targetBlurRadius)
         } else if currentBlurRadius > targetBlurRadius {
-            // Fast ease-out: -3 per frame for quick recovery
-            currentBlurRadius = max(currentBlurRadius - 3, targetBlurRadius)
+            // Near-instant ease-out: clear immediately when posture is good
+            currentBlurRadius = max(currentBlurRadius - 32, targetBlurRadius)
         }
 
         // Calculate alpha for NSVisualEffectView modes
