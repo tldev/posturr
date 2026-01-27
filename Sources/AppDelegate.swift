@@ -246,7 +246,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         setupMenuBar()
         setupOverlayWindows()
-        if warningMode != .blur {
+        if warningMode != .blur && warningMode != .none {
             warningOverlayManager.mode = warningMode
             warningOverlayManager.warningColor = warningColor
             warningOverlayManager.setupOverlayWindows()
@@ -965,7 +965,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         blurViews.removeAll()
         setupOverlayWindows()
 
-        if warningMode != .blur {
+        if warningMode != .blur && warningMode != .none {
             warningOverlayManager.rebuildOverlayWindows()
         }
     }
@@ -1015,7 +1015,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Set new mode and rebuild if needed
         warningMode = newMode
-        if warningMode != .blur {
+        if warningMode != .blur && warningMode != .none {
             warningOverlayManager.mode = warningMode
             warningOverlayManager.warningColor = warningColor
             warningOverlayManager.setupOverlayWindows()
@@ -1028,6 +1028,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func updateBlur() {
+        if warningMode == .none {
+            postureWarningIntensity = 0
+            if currentBlurRadius != 0 || targetBlurRadius != 0 {
+                clearBlur()
+            } else {
+                for blurView in blurViews {
+                    blurView.alphaValue = 0
+                }
+            }
+            warningOverlayManager.targetIntensity = 0
+            warningOverlayManager.updateWarning()
+            return
+        }
+
         // Two independent concerns:
         // 1. Privacy blur: full blur when away (always uses blur overlay)
         // 2. Posture warning: user's chosen style (blur/vignette/border)

@@ -180,12 +180,13 @@ struct SettingsView: View {
                     }
                 }
 
-                GroupBoxWithInfo("Warning Style", helpText: "How Posturr alerts you when slouching. Blur obscures the screen, Vignette shows a red glow from the edges, Border shows red borders around the screen.") {
+                GroupBoxWithInfo("Warning Style", helpText: "How Posturr alerts you when slouching. Blur obscures the screen, Vignette shows a red glow from the edges, Border shows red borders around the screen. None disables visual warnings.") {
                     VStack(alignment: .leading, spacing: 10) {
                         Picker("", selection: $warningMode) {
                             Text("Blur").tag(WarningMode.blur)
                             Text("Vignette").tag(WarningMode.vignette)
                             Text("Border").tag(WarningMode.border)
+                            Text("None").tag(WarningMode.none)
                         }
                         .labelsHidden()
                         .pickerStyle(.segmented)

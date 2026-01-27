@@ -324,6 +324,8 @@ class WarningOverlayManager {
             case .blur:
                 // Blur is handled separately in AppDelegate
                 overlayView = NSView(frame: NSRect(origin: .zero, size: frame.size))
+            case .none:
+                overlayView = NSView(frame: NSRect(origin: .zero, size: frame.size))
             }
 
             window.contentView = overlayView

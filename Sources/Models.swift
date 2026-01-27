@@ -14,6 +14,7 @@ enum WarningMode: String, CaseIterable {
     case blur = "blur"
     case vignette = "vignette"
     case border = "border"
+    case none = "none"
 }
 
 // MARK: - Settings Keys
