@@ -82,7 +82,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var showInDock = false
     var pauseOnTheGo = false
     var useReducedResolution = false
-    var useReducedFrameRate = false
+    var targetFrameRate: Double = 10.0
     var settingsWindowController = SettingsWindowController()
     var analyticsWindowController: AnalyticsWindowController?
 
@@ -121,7 +121,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // Frame throttling
     var lastFrameTime: Date = .distantPast
-    var frameInterval: TimeInterval { useReducedFrameRate ? 0.25 : 0.1 }
+    var frameInterval: TimeInterval { 1.0 / targetFrameRate }
 
     var cameraSetupComplete = false
     var waitingForPermission = false
@@ -783,7 +783,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         defaults.set(showInDock, forKey: SettingsKeys.showInDock)
         defaults.set(pauseOnTheGo, forKey: SettingsKeys.pauseOnTheGo)
         defaults.set(useReducedResolution, forKey: SettingsKeys.useReducedResolution)
-        defaults.set(useReducedFrameRate, forKey: SettingsKeys.useReducedFrameRate)
+        defaults.set(targetFrameRate, forKey: SettingsKeys.targetFrameRate)
         defaults.set(warningMode.rawValue, forKey: SettingsKeys.warningMode)
         defaults.set(warningOnsetDelay, forKey: SettingsKeys.warningOnsetDelay)
         if let colorData = try? NSKeyedArchiver.archivedData(withRootObject: warningColor, requiringSecureCoding: false) {
@@ -808,7 +808,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         showInDock = defaults.bool(forKey: SettingsKeys.showInDock)
         pauseOnTheGo = defaults.bool(forKey: SettingsKeys.pauseOnTheGo)
         useReducedResolution = defaults.bool(forKey: SettingsKeys.useReducedResolution)
-        useReducedFrameRate = defaults.bool(forKey: SettingsKeys.useReducedFrameRate)
+        if defaults.object(forKey: SettingsKeys.targetFrameRate) != nil {
+            targetFrameRate = defaults.double(forKey: SettingsKeys.targetFrameRate)
+        }
         selectedCameraID = defaults.string(forKey: SettingsKeys.lastCameraID)
         if let modeString = defaults.string(forKey: SettingsKeys.warningMode),
            let mode = WarningMode(rawValue: modeString) {

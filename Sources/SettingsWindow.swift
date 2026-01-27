@@ -152,7 +152,11 @@ struct SettingsView: View {
     @State private var warningColor: Color = Color(WarningDefaults.color)
     @State private var warningOnsetDelay: Double = 0.0
     @State private var useReducedResolution: Bool = false
-    @State private var useReducedFrameRate: Bool = false
+    @State private var frameRateSlider: Double = 4
+    @State private var showingFrameRateHelp: Bool = false
+
+    let frameRateValues: [Double] = [0.5, 1, 2, 4, 10, 20, 30]
+    let frameRateLabels = ["0.5", "1", "2", "4", "10", "20", "30"]
 
     let intensityValues: [Double] = [0.08, 0.15, 0.35, 0.65, 1.2]
     let intensityLabels = ["Gentle", "Easy", "Medium", "Firm", "Aggressive"]
@@ -371,14 +375,39 @@ struct SettingsView: View {
 
                         Divider()
 
-                        SettingToggle(
-                            title: "Reduced frame rate",
-                            isOn: $useReducedFrameRate,
-                            helpText: "Processes 4 frames/sec instead of 10. Reduces CPU usage but may affect detection responsiveness."
-                        )
-                        .onChange(of: useReducedFrameRate) { newValue in
-                            appDelegate.useReducedFrameRate = newValue
-                            appDelegate.saveSettings()
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack(spacing: 4) {
+                                Text("Frame rate")
+                                Button(action: { showingFrameRateHelp.toggle() }) {
+                                    Image(systemName: "info.circle")
+                                        .foregroundColor(.secondary)
+                                }
+                                .buttonStyle(.plain)
+                                .popover(isPresented: $showingFrameRateHelp, arrowEdge: .trailing) {
+                                    Text("How many frames per second to process. Lower values reduce CPU usage but may affect detection responsiveness.")
+                                        .padding(10)
+                                        .frame(width: 200)
+                                }
+                            }
+                            Slider(value: $frameRateSlider, in: 0...6, step: 1)
+                                .onChange(of: frameRateSlider) { newValue in
+                                    let index = Int(newValue)
+                                    appDelegate.targetFrameRate = frameRateValues[index]
+                                    appDelegate.saveSettings()
+                                }
+                            HStack {
+                                Text("0.5")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                Spacer()
+                                Text("\(frameRateLabels[Int(frameRateSlider)]) fps")
+                                    .font(.caption)
+                                    .fontWeight(.medium)
+                                Spacer()
+                                Text("30")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
                         }
                     }
                 }
@@ -401,7 +430,7 @@ struct SettingsView: View {
         pauseOnTheGo = appDelegate.pauseOnTheGo
         useCompatibilityMode = appDelegate.useCompatibilityMode
         useReducedResolution = appDelegate.useReducedResolution
-        useReducedFrameRate = appDelegate.useReducedFrameRate
+        frameRateSlider = Double(frameRateValues.firstIndex(of: appDelegate.targetFrameRate) ?? 4)
         warningMode = appDelegate.warningMode
         warningColor = Color(appDelegate.warningColor)
         warningOnsetDelay = appDelegate.warningOnsetDelay
