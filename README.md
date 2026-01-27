@@ -207,3 +207,4 @@ Want this on Linux? See [postured](https://github.com/vadi2/postured).
 - [@ssisk](https://github.com/ssisk) - Screen lock pause feature suggestion
 - [@gcanyon](https://github.com/gcanyon) - Warning onset delay feature suggestion
 - [@javabudd](https://github.com/javabudd) - Analytics dashboard
+- [@danielroek](https://github.com/danielroek) - "None" warning style option
