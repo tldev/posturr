@@ -22,6 +22,7 @@ enum SettingsKeys {
     static let deadZone = "deadZone"
     static let useCompatibilityMode = "useCompatibilityMode"
     static let blurWhenAway = "blurWhenAway"
+    static let disableBlur = "disableBlur"
     static let showInDock = "showInDock"
     static let pauseOnTheGo = "pauseOnTheGo"
     static let lastCameraID = "lastCameraID"

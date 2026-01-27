@@ -143,6 +143,7 @@ struct SettingsView: View {
     @State private var intensitySlider: Double = 2
     @State private var deadZoneSlider: Double = 2
     @State private var blurWhenAway: Bool = false
+    @State private var disableBlur: Bool = false
     @State private var showInDock: Bool = false
     @State private var pauseOnTheGo: Bool = false
     @State private var useCompatibilityMode: Bool = false
@@ -303,6 +304,21 @@ struct SettingsView: View {
                         Divider()
 
                         SettingToggle(
+                            title: "Disable blur",
+                            isOn: $disableBlur,
+                            helpText: "Keep detection running, but stop the blur effect"
+                        )
+                        .onChange(of: disableBlur) { newValue in
+                            appDelegate.disableBlur = newValue
+                            appDelegate.saveSettings()
+                            if newValue {
+                                appDelegate.clearBlur()
+                            }
+                        }
+
+                        Divider()
+
+                        SettingToggle(
                             title: "Show in dock",
                             isOn: $showInDock,
                             helpText: "Keep Posturr visible in the Dock and Cmd+Tab switcher"
@@ -368,6 +384,7 @@ struct SettingsView: View {
         intensity = appDelegate.intensity
         deadZone = appDelegate.deadZone
         blurWhenAway = appDelegate.blurWhenAway
+        disableBlur = appDelegate.disableBlur
         showInDock = appDelegate.showInDock
         pauseOnTheGo = appDelegate.pauseOnTheGo
         useCompatibilityMode = appDelegate.useCompatibilityMode

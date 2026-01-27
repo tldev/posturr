@@ -7,6 +7,7 @@ class SettingsStorage {
     var deadZone: CGFloat = 0.03
     var useCompatibilityMode = false
     var blurWhenAway = false
+    var disableBlur = false
     var showInDock = false
     var pauseOnTheGo = false
     var selectedCameraID: String?
@@ -17,6 +18,7 @@ class SettingsStorage {
         defaults.set(deadZone, forKey: SettingsKeys.deadZone)
         defaults.set(useCompatibilityMode, forKey: SettingsKeys.useCompatibilityMode)
         defaults.set(blurWhenAway, forKey: SettingsKeys.blurWhenAway)
+        defaults.set(disableBlur, forKey: SettingsKeys.disableBlur)
         defaults.set(showInDock, forKey: SettingsKeys.showInDock)
         defaults.set(pauseOnTheGo, forKey: SettingsKeys.pauseOnTheGo)
         if let cameraID = selectedCameraID {
@@ -35,6 +37,7 @@ class SettingsStorage {
         }
         useCompatibilityMode = defaults.bool(forKey: SettingsKeys.useCompatibilityMode)
         blurWhenAway = defaults.bool(forKey: SettingsKeys.blurWhenAway)
+        disableBlur = defaults.bool(forKey: SettingsKeys.disableBlur)
         showInDock = defaults.bool(forKey: SettingsKeys.showInDock)
         pauseOnTheGo = defaults.bool(forKey: SettingsKeys.pauseOnTheGo)
         selectedCameraID = defaults.string(forKey: SettingsKeys.lastCameraID)

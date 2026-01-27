@@ -79,6 +79,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var deadZone: CGFloat = 0.03
     var useCompatibilityMode = false
     var blurWhenAway = false
+    var disableBlur = false
     var showInDock = false
     var pauseOnTheGo = false
     var settingsWindowController = SettingsWindowController()
@@ -767,6 +768,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         defaults.set(deadZone, forKey: SettingsKeys.deadZone)
         defaults.set(useCompatibilityMode, forKey: SettingsKeys.useCompatibilityMode)
         defaults.set(blurWhenAway, forKey: SettingsKeys.blurWhenAway)
+        defaults.set(disableBlur, forKey: SettingsKeys.disableBlur)
         defaults.set(showInDock, forKey: SettingsKeys.showInDock)
         defaults.set(pauseOnTheGo, forKey: SettingsKeys.pauseOnTheGo)
         defaults.set(warningMode.rawValue, forKey: SettingsKeys.warningMode)
@@ -790,6 +792,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         useCompatibilityMode = defaults.bool(forKey: SettingsKeys.useCompatibilityMode)
         blurWhenAway = defaults.bool(forKey: SettingsKeys.blurWhenAway)
+        disableBlur = defaults.bool(forKey: SettingsKeys.disableBlur)
         showInDock = defaults.bool(forKey: SettingsKeys.showInDock)
         pauseOnTheGo = defaults.bool(forKey: SettingsKeys.pauseOnTheGo)
         selectedCameraID = defaults.string(forKey: SettingsKeys.lastCameraID)
@@ -1029,6 +1032,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func updateBlur() {
+        if warningMode == .blur && disableBlur {
+            if currentBlurRadius != 0 || targetBlurRadius != 0 {
+                clearBlur()
+            } else {
+                for blurView in blurViews {
+                    blurView.alphaValue = 0
+                }
+            }
+            return
+        }
+
         // Update warning overlay if not in blur mode
         if warningMode != .blur {
             warningOverlayManager.targetIntensity = CGFloat(targetBlurRadius) / 64.0
@@ -1134,7 +1148,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         if consecutiveNoDetectionFrames >= awayFrameThreshold {
-            targetBlurRadius = 64
+            if warningMode == .blur && disableBlur {
+                targetBlurRadius = 0
+            } else {
+                targetBlurRadius = 64
+            }
 
             DispatchQueue.main.async {
                 self.statusMenuItem.title = "Status: Away"
@@ -1223,7 +1241,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 let adjustedSeverity = pow(severity, 1.0 / intensity)
 
                 let blurIntensity = Int32(adjustedSeverity * 64)
-                targetBlurRadius = min(64, blurIntensity)
+                if warningMode == .blur && disableBlur {
+                    targetBlurRadius = 0
+                } else {
+                    targetBlurRadius = min(64, blurIntensity)
+                }
 
                 DispatchQueue.main.async {
                     self.statusMenuItem.title = "Status: Slouching"
