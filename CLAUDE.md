@@ -44,7 +44,12 @@ EOF
 )"
 ```
 
-The release notes should describe what changed since the previous version, not generic feature lists.
+**Writing good release notes:**
+- Keep it simple and user-focused - describe the benefit, not the implementation
+- Avoid technical jargon (e.g., "brandCyan color" → "consistent styling")
+- Don't repeat commit messages verbatim - synthesize changes into what users care about
+- One clear sentence is better than a list of technical details
+- Example: "Consistent styling across Settings and Analytics windows" instead of "Redesigned analytics window with brand-consistent styling, replaced shadows with borders, updated color scheme"
 
 ### Acknowledgments
 When implementing features or fixes from GitHub issues, always give credit to the person who suggested it:
