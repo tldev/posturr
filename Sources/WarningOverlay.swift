@@ -337,7 +337,7 @@ class SolidOverlayView: NSView {
 
         lastDrawnIntensity = intensity
 
-        let maxAlpha: CGFloat = 1.0
+        let maxAlpha: CGFloat = 0.95
         let alpha = intensity * maxAlpha
         colorLayer.backgroundColor = warningColor.withAlphaComponent(alpha).cgColor
     }
