@@ -312,7 +312,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func setupDetectors() {
         // Configure camera detector
         cameraDetector.blurWhenAway = blurWhenAway
-        cameraDetector.frameInterval = 1.0 / detectionMode.frameRate
+        cameraDetector.baseFrameInterval = 1.0 / detectionMode.frameRate
 
         cameraDetector.onPostureReading = { [weak self] reading in
             self?.handlePostureReading(reading)
@@ -758,7 +758,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applyDetectionMode() {
-        cameraDetector.frameInterval = 1.0 / detectionMode.frameRate
+        cameraDetector.baseFrameInterval = 1.0 / detectionMode.frameRate
     }
 
     // MARK: - Camera Hot-Plug

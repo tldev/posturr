@@ -75,7 +75,12 @@ class CameraPostureDetector: NSObject, PostureDetector {
 
     // Frame throttling
     private var lastFrameTime: Date = .distantPast
-    var frameInterval: TimeInterval = 0.25  // 4 fps default
+    var baseFrameInterval: TimeInterval = 0.25  // Configured frame interval (e.g., from detection mode)
+
+    /// Actual frame interval - faster when slouching for quicker recovery detection
+    private var frameInterval: TimeInterval {
+        isCurrentlySlouching ? 0.1 : baseFrameInterval
+    }
 
     // MARK: - Away Detection
 
