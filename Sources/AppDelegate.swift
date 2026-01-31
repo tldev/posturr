@@ -581,8 +581,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         trackingSource = source
         saveSettings()
 
-        // Start calibration for the new source
-        startCalibration()
+        // Check if calibration exists for the new source
+        if isCalibrated {
+            // Existing calibration - start monitoring
+            startMonitoring()
+        } else {
+            // No calibration - start calibration flow
+            startCalibration()
+        }
     }
 
     // MARK: - Calibration
