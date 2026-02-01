@@ -2,6 +2,45 @@ import Foundation
 import CoreGraphics
 import AppKit
 
+// MARK: - Icon Utilities
+
+/// Applies macOS-style rounded corner mask to an app icon
+func applyMacOSIconMask(to image: NSImage) -> NSImage {
+    let size = NSSize(width: 512, height: 512)
+
+    guard let bitmapRep = NSBitmapImageRep(
+        bitmapDataPlanes: nil,
+        pixelsWide: Int(size.width),
+        pixelsHigh: Int(size.height),
+        bitsPerSample: 8,
+        samplesPerPixel: 4,
+        hasAlpha: true,
+        isPlanar: false,
+        colorSpaceName: .deviceRGB,
+        bytesPerRow: 0,
+        bitsPerPixel: 0
+    ) else { return image }
+
+    NSGraphicsContext.saveGraphicsState()
+    NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: bitmapRep)
+
+    let cornerRadius = size.width * 0.2237
+    let rect = NSRect(origin: .zero, size: size)
+
+    NSColor.clear.setFill()
+    rect.fill()
+
+    let path = NSBezierPath(roundedRect: rect, xRadius: cornerRadius, yRadius: cornerRadius)
+    path.addClip()
+    image.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1.0)
+
+    NSGraphicsContext.restoreGraphicsState()
+
+    let result = NSImage(size: size)
+    result.addRepresentation(bitmapRep)
+    return result
+}
+
 // MARK: - Menu Bar Icons
 
 enum MenuBarIcon: String, CaseIterable {

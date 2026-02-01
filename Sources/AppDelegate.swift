@@ -1,57 +1,33 @@
 import AppKit
 import AVFoundation
 import Vision
-import Carbon.HIToolbox
 import os.log
 
 private let log = OSLog(subsystem: "com.posturr", category: "AppDelegate")
 
-// MARK: - Icon Masking Utility
+// MARK: - MenuBarIconType to MenuBarIcon Conversion
 
-func applyMacOSIconMask(to image: NSImage) -> NSImage {
-    let size = NSSize(width: 512, height: 512)
-
-    guard let bitmapRep = NSBitmapImageRep(
-        bitmapDataPlanes: nil,
-        pixelsWide: Int(size.width),
-        pixelsHigh: Int(size.height),
-        bitsPerSample: 8,
-        samplesPerPixel: 4,
-        hasAlpha: true,
-        isPlanar: false,
-        colorSpaceName: .deviceRGB,
-        bytesPerRow: 0,
-        bitsPerPixel: 0
-    ) else { return image }
-
-    NSGraphicsContext.saveGraphicsState()
-    NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: bitmapRep)
-
-    let cornerRadius = size.width * 0.2237
-    let rect = NSRect(origin: .zero, size: size)
-
-    NSColor.clear.setFill()
-    rect.fill()
-
-    let path = NSBezierPath(roundedRect: rect, xRadius: cornerRadius, yRadius: cornerRadius)
-    path.addClip()
-    image.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1.0)
-
-    NSGraphicsContext.restoreGraphicsState()
-
-    let result = NSImage(size: size)
-    result.addRepresentation(bitmapRep)
-    return result
+extension MenuBarIconType {
+    var menuBarIcon: MenuBarIcon {
+        switch self {
+        case .good: return .good
+        case .bad: return .bad
+        case .away: return .away
+        case .paused: return .paused
+        case .calibrating: return .calibrating
+        }
+    }
 }
 
 // MARK: - App Delegate
 
-class AppDelegate: NSObject, NSApplicationDelegate {
+public class AppDelegate: NSObject, NSApplicationDelegate {
+    public override init() {
+        super.init()
+    }
+
     // UI Components
-    var statusItem: NSStatusItem!
-    var statusMenuItem: NSMenuItem!
-    var enabledMenuItem: NSMenuItem!
-    var recalibrateMenuItem: NSMenuItem!
+    let menuBarManager = MenuBarManager()
 
     // Overlay windows and blur
     var windows: [NSWindow] = []
@@ -102,7 +78,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     // Settings
-    var intensity: CGFloat = 1.0
+    var intensity: CGFloat = 1.0 {
+        didSet { postureConfig.intensity = intensity }
+    }
     var deadZone: CGFloat = 0.03
     var useCompatibilityMode = false
     var blurWhenAway = false {
@@ -120,39 +98,39 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var analyticsWindowController: AnalyticsWindowController?
     var onboardingWindowController: OnboardingWindowController?
 
-    // Display management
-    var displayDebounceTimer: Timer?
-
-    // Camera observers
-    var cameraConnectedObserver: NSObjectProtocol?
-    var cameraDisconnectedObserver: NSObjectProtocol?
-
-    // Screen lock observers
-    var screenLockObserver: NSObjectProtocol?
-    var screenUnlockObserver: NSObjectProtocol?
+    // Observers and monitors
+    let displayMonitor = DisplayMonitor()
+    let cameraObserver = CameraObserver()
+    let screenLockObserver = ScreenLockObserver()
+    let hotkeyManager = HotkeyManager()
     var stateBeforeLock: AppState?
 
-    // Detection state
-    var consecutiveBadFrames = 0
-    var consecutiveGoodFrames = 0
-    let frameThreshold = 8
+    // Detection state - consolidated into PostureEngine types
+    var monitoringState = PostureMonitoringState()
+    var postureConfig = PostureConfig()
 
-    // Hysteresis
-    var isCurrentlySlouching = false
-    var isCurrentlyAway = false
-
-    // Separate intensities for different concerns (0.0 to 1.0)
-    var postureWarningIntensity: CGFloat = 0
+    // Computed properties for backward compatibility
+    var isCurrentlySlouching: Bool {
+        get { monitoringState.isCurrentlySlouching }
+        set { monitoringState.isCurrentlySlouching = newValue }
+    }
+    var isCurrentlyAway: Bool {
+        get { monitoringState.isCurrentlyAway }
+        set { monitoringState.isCurrentlyAway = newValue }
+    }
+    var postureWarningIntensity: CGFloat {
+        get { monitoringState.postureWarningIntensity }
+        set { monitoringState.postureWarningIntensity = newValue }
+    }
 
     // Blur onset delay
-    var warningOnsetDelay: Double = 0.0
-    var badPostureStartTime: Date?
+    var warningOnsetDelay: Double = 0.0 {
+        didSet { postureConfig.warningOnsetDelay = warningOnsetDelay }
+    }
 
-    // Global keyboard shortcut (Carbon API)
+    // Global keyboard shortcut
     var toggleShortcutEnabled = true
     var toggleShortcut = KeyboardShortcut.defaultShortcut
-    var carbonHotKeyRef: EventHotKeyRef?
-    var carbonEventHandler: EventHandlerRef?
 
     // Frame throttling
     var frameInterval: TimeInterval {
@@ -228,47 +206,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func syncUIToState() {
-        switch state {
-        case .disabled:
-            statusMenuItem.title = "Status: Disabled"
-            statusItem.button?.image = MenuBarIcon.paused.image
+        let uiState = PostureUIState.derive(
+            from: state,
+            isCalibrated: isCalibrated,
+            isCurrentlyAway: isCurrentlyAway,
+            isCurrentlySlouching: isCurrentlySlouching,
+            trackingSource: trackingSource
+        )
 
-        case .calibrating:
-            statusMenuItem.title = "Status: Calibrating..."
-            statusItem.button?.image = MenuBarIcon.calibrating.image
-
-        case .monitoring:
-            if isCalibrated {
-                statusMenuItem.title = "Status: Good Posture"
-                statusItem.button?.image = MenuBarIcon.good.image
-            } else {
-                statusMenuItem.title = "Status: Starting..."
-                statusItem.button?.image = MenuBarIcon.good.image
-            }
-
-        case .paused(let reason):
-            switch reason {
-            case .noProfile:
-                statusMenuItem.title = "Status: Calibration needed"
-            case .onTheGo:
-                statusMenuItem.title = "Status: Paused (on the go - recalibrate)"
-            case .cameraDisconnected:
-                statusMenuItem.title = trackingSource == .camera ? "Status: Camera disconnected" : "Status: AirPods disconnected"
-            case .screenLocked:
-                statusMenuItem.title = "Status: Paused (screen locked)"
-            case .airPodsRemoved:
-                statusMenuItem.title = "Status: Paused (put in AirPods)"
-            }
-            statusItem.button?.image = MenuBarIcon.paused.image
-        }
-
-        enabledMenuItem.state = (state != .disabled) ? .on : .off
-        recalibrateMenuItem.isEnabled = state != .calibrating
+        menuBarManager.updateStatus(text: uiState.statusText, icon: uiState.icon.menuBarIcon)
+        menuBarManager.updateEnabledState(uiState.isEnabled)
+        menuBarManager.updateRecalibrateEnabled(uiState.canRecalibrate)
     }
 
     // MARK: - App Lifecycle
 
-    func applicationDidFinishLaunching(_ notification: Notification) {
+    public func applicationDidFinishLaunching(_ notification: Notification) {
         loadSettings()
 
         if showInDock {
@@ -290,10 +243,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             warningOverlayManager.setupOverlayWindows()
         }
 
-        registerDisplayChangeCallback()
-        registerCameraChangeNotifications()
-        registerScreenLockNotifications()
-        registerGlobalHotKey()
+        setupObservers()
 
         Timer.scheduledTimer(withTimeInterval: 0.033, repeats: true) { [weak self] _ in
             self?.updateBlur()
@@ -302,8 +252,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         initialSetupFlow()
     }
 
-    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        statusItem.button?.performClick(nil)
+    public func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        menuBarManager.statusItem.button?.performClick(nil)
         return false
     }
 
@@ -358,125 +308,112 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func handlePostureReading(_ reading: PostureReading) {
         guard state == .monitoring else { return }
 
-        // Track analytics
-        AnalyticsManager.shared.trackTime(interval: frameInterval, isSlouching: isCurrentlySlouching)
+        // Use PostureEngine for pure logic
+        let result = PostureEngine.processReading(
+            reading,
+            state: monitoringState,
+            config: postureConfig,
+            frameInterval: frameInterval
+        )
 
-        if reading.isBadPosture {
-            consecutiveBadFrames += 1
-            consecutiveGoodFrames = 0
+        // Update state
+        monitoringState = result.newState
 
-            if consecutiveBadFrames >= frameThreshold {
-                // Start tracking when bad posture began
-                if badPostureStartTime == nil {
-                    badPostureStartTime = Date()
-                }
-
-                // Check onset delay
-                let elapsedTime = Date().timeIntervalSince(badPostureStartTime!)
-                guard elapsedTime >= warningOnsetDelay else { return }
-
-                // Record slouch event only once when transitioning
-                if !isCurrentlySlouching {
-                    AnalyticsManager.shared.recordSlouchEvent()
-                }
-
-                isCurrentlySlouching = true
-
-                // Adjust severity by intensity setting
-                let adjustedSeverity = pow(reading.severity, 1.0 / Double(intensity))
-                postureWarningIntensity = CGFloat(adjustedSeverity)
-
-                DispatchQueue.main.async {
-                    self.statusMenuItem.title = "Status: Slouching"
-                    self.statusItem.button?.image = MenuBarIcon.bad.image
-                }
-            }
-        } else {
-            consecutiveGoodFrames += 1
-            consecutiveBadFrames = 0
-            badPostureStartTime = nil
-            postureWarningIntensity = 0
-
-            if consecutiveGoodFrames >= 5 {
-                isCurrentlySlouching = false
+        // Execute effects
+        for effect in result.effects {
+            switch effect {
+            case .trackAnalytics(let interval, let isSlouching):
+                AnalyticsManager.shared.trackTime(interval: interval, isSlouching: isSlouching)
+            case .recordSlouchEvent:
+                AnalyticsManager.shared.recordSlouchEvent()
+            case .updateUI:
                 DispatchQueue.main.async {
                     self.syncUIToState()
                 }
+            case .updateBlur:
+                DispatchQueue.main.async {
+                    self.updateBlur()
+                }
             }
-        }
-
-        DispatchQueue.main.async {
-            self.updateBlur()
         }
     }
 
     private func handleAwayStateChange(_ isAway: Bool) {
         guard state == .monitoring else { return }
 
-        isCurrentlyAway = isAway
+        let result = PostureEngine.processAwayChange(isAway: isAway, state: monitoringState)
+        monitoringState = result.newState
 
-        if isAway {
-            DispatchQueue.main.async {
-                self.statusMenuItem.title = "Status: Away"
-                self.statusItem.button?.image = MenuBarIcon.away.image
-            }
-        } else {
+        if result.shouldUpdateUI {
             DispatchQueue.main.async {
                 self.syncUIToState()
             }
         }
     }
 
+    // MARK: - Observers Setup
+
+    private func setupObservers() {
+        // Display configuration changes
+        displayMonitor.onDisplayConfigurationChange = { [weak self] in
+            self?.handleDisplayConfigurationChange()
+        }
+        displayMonitor.startMonitoring()
+
+        // Camera hot-plug
+        cameraObserver.onCameraConnected = { [weak self] device in
+            self?.handleCameraConnected(device)
+        }
+        cameraObserver.onCameraDisconnected = { [weak self] device in
+            self?.handleCameraDisconnected(device)
+        }
+        cameraObserver.startObserving()
+
+        // Screen lock/unlock
+        screenLockObserver.onScreenLocked = { [weak self] in
+            self?.handleScreenLocked()
+        }
+        screenLockObserver.onScreenUnlocked = { [weak self] in
+            self?.handleScreenUnlocked()
+        }
+        screenLockObserver.startObserving()
+
+        // Global hotkey
+        hotkeyManager.configure(
+            enabled: toggleShortcutEnabled,
+            shortcut: toggleShortcut,
+            onToggle: { [weak self] in
+                self?.toggleEnabled()
+            }
+        )
+    }
+
     // MARK: - Menu Bar
 
-    func setupMenuBar() {
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+    private func setupMenuBar() {
+        menuBarManager.setup()
+        menuBarManager.updateShortcut(enabled: toggleShortcutEnabled, shortcut: toggleShortcut)
 
-        if let button = statusItem.button {
-            button.image = MenuBarIcon.good.image
+        menuBarManager.onToggleEnabled = { [weak self] in
+            self?.toggleEnabled()
         }
-
-        let menu = NSMenu()
-
-        statusMenuItem = NSMenuItem(title: "Status: Starting...", action: nil, keyEquivalent: "")
-        statusMenuItem.isEnabled = false
-        menu.addItem(statusMenuItem)
-
-        menu.addItem(NSMenuItem.separator())
-
-        enabledMenuItem = NSMenuItem(title: "Enable", action: #selector(toggleEnabled), keyEquivalent: "")
-        enabledMenuItem.target = self
-        enabledMenuItem.state = .on
-        updateEnabledMenuItemShortcut()
-        menu.addItem(enabledMenuItem)
-
-        recalibrateMenuItem = NSMenuItem(title: "Recalibrate", action: #selector(recalibrate), keyEquivalent: "r")
-        recalibrateMenuItem.target = self
-        menu.addItem(recalibrateMenuItem)
-
-        menu.addItem(NSMenuItem.separator())
-
-        let statsItem = NSMenuItem(title: "Analytics", action: #selector(showAnalytics), keyEquivalent: "a")
-        statsItem.target = self
-        statsItem.image = NSImage(systemSymbolName: "chart.bar.xaxis", accessibilityDescription: "Analytics")
-        menu.addItem(statsItem)
-
-        let settingsItem = NSMenuItem(title: "Settings", action: #selector(openSettings), keyEquivalent: ",")
-        settingsItem.target = self
-        menu.addItem(settingsItem)
-
-        menu.addItem(NSMenuItem.separator())
-
-        let quitItem = NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "q")
-        quitItem.target = self
-        menu.addItem(quitItem)
-
-        statusItem.menu = menu
+        menuBarManager.onRecalibrate = { [weak self] in
+            self?.startCalibration()
+        }
+        menuBarManager.onShowAnalytics = { [weak self] in
+            self?.showAnalytics()
+        }
+        menuBarManager.onOpenSettings = { [weak self] in
+            self?.openSettings()
+        }
+        menuBarManager.onQuit = { [weak self] in
+            self?.quit()
+        }
     }
 
     // MARK: - Menu Actions
 
-    @objc func toggleEnabled() {
+    private func toggleEnabled() {
         if state == .disabled {
             if !isCalibrated {
                 state = .paused(.noProfile)
@@ -493,11 +430,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         saveSettings()
     }
 
-    @objc func recalibrate() {
-        startCalibration()
-    }
-
-    @objc func showAnalytics() {
+    private func showAnalytics() {
         if analyticsWindowController == nil {
             analyticsWindowController = AnalyticsWindowController()
         }
@@ -506,11 +439,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    @objc func openSettings() {
-        settingsWindowController.showSettings(appDelegate: self, fromStatusItem: statusItem)
+    func openSettings() {
+        settingsWindowController.showSettings(appDelegate: self, fromStatusItem: menuBarManager.statusItem)
     }
 
-    @objc func quit() {
+    private func quit() {
         cameraDetector.stop()
         airPodsDetector.stop()
         NSApplication.shared.terminate(nil)
@@ -523,7 +456,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         setupComplete = true
 
         // Check if we have existing calibration
-        let configKey = getCurrentConfigKey()
+        let configKey = DisplayMonitor.getCurrentConfigKey()
 
         if trackingSource == .camera {
             if let profile = loadProfile(forKey: configKey) {
@@ -702,7 +635,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 postureRange: cameraCalibration.postureRange,
                 cameraID: cameraCalibration.cameraID
             )
-            let configKey = getCurrentConfigKey()
+            let configKey = DisplayMonitor.getCurrentConfigKey()
             saveProfile(forKey: configKey, data: profile)
         } else if let airPodsCalibration = calibration as? AirPodsCalibrationData {
             self.airPodsCalibration = airPodsCalibration
@@ -711,8 +644,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         saveSettings()
         calibrationController = nil
 
-        consecutiveBadFrames = 0
-        consecutiveGoodFrames = 0
+        monitoringState.reset()
 
         startMonitoring()
     }
@@ -762,33 +694,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Camera Hot-Plug
 
-    func registerCameraChangeNotifications() {
-        cameraConnectedObserver = NotificationCenter.default.addObserver(
-            forName: NSNotification.Name.AVCaptureDeviceWasConnected,
-            object: nil,
-            queue: .main
-        ) { [weak self] notification in
-            self?.handleCameraConnected(notification)
-        }
-
-        cameraDisconnectedObserver = NotificationCenter.default.addObserver(
-            forName: NSNotification.Name.AVCaptureDeviceWasDisconnected,
-            object: nil,
-            queue: .main
-        ) { [weak self] notification in
-            self?.handleCameraDisconnected(notification)
-        }
-    }
-
-    func handleCameraConnected(_ notification: Notification) {
+    private func handleCameraConnected(_ device: AVCaptureDevice) {
         guard trackingSource == .camera else { return }
         syncUIToState()
 
-        guard let device = notification.object as? AVCaptureDevice,
-              device.hasMediaType(.video),
-              case .paused(let reason) = state else { return }
+        guard case .paused(let reason) = state else { return }
 
-        let configKey = getCurrentConfigKey()
+        let configKey = DisplayMonitor.getCurrentConfigKey()
         if let profile = loadProfile(forKey: configKey),
            profile.cameraID == device.uniqueID {
             cameraDetector.selectedCameraID = profile.cameraID
@@ -806,11 +718,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    func handleCameraDisconnected(_ notification: Notification) {
+    private func handleCameraDisconnected(_ device: AVCaptureDevice) {
         guard trackingSource == .camera else { return }
-
-        guard let device = notification.object as? AVCaptureDevice,
-              device.hasMediaType(.video) else { return }
 
         guard device.uniqueID == selectedCameraID else {
             syncUIToState()
@@ -823,7 +732,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             cameraDetector.selectedCameraID = fallbackCamera.uniqueID
             cameraDetector.switchCamera(to: fallbackCamera.uniqueID)
 
-            let configKey = getCurrentConfigKey()
+            let configKey = DisplayMonitor.getCurrentConfigKey()
             if let profile = loadProfile(forKey: configKey), profile.cameraID == fallbackCamera.uniqueID {
                 cameraCalibration = CameraCalibrationData(
                     goodPostureY: profile.goodPostureY,
@@ -843,33 +752,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Screen Lock Detection
 
-    func registerScreenLockNotifications() {
-        let dnc = DistributedNotificationCenter.default()
-
-        screenLockObserver = dnc.addObserver(
-            forName: NSNotification.Name("com.apple.screenIsLocked"),
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            self?.handleScreenLocked()
-        }
-
-        screenUnlockObserver = dnc.addObserver(
-            forName: NSNotification.Name("com.apple.screenIsUnlocked"),
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            self?.handleScreenUnlocked()
-        }
-    }
-
-    func handleScreenLocked() {
+    private func handleScreenLocked() {
         guard state.isActive || (state != .disabled && state != .paused(.screenLocked)) else { return }
         stateBeforeLock = state
         state = .paused(.screenLocked)
     }
 
-    func handleScreenUnlocked() {
+    private func handleScreenUnlocked() {
         guard case .paused(.screenLocked) = state else { return }
 
         if let previousState = stateBeforeLock {
@@ -880,92 +769,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    // MARK: - Global Keyboard Shortcut (Carbon API)
-
-    func registerGlobalHotKey() {
-        unregisterGlobalHotKey()
-
-        guard toggleShortcutEnabled else { return }
-
-        let carbonModifiers = carbonModifiersFromNSEvent(toggleShortcut.modifiers)
-
-        var hotKeyID = EventHotKeyID()
-        hotKeyID.signature = OSType(0x504F5354)
-        hotKeyID.id = 1
-
-        if carbonEventHandler == nil {
-            var eventType = EventTypeSpec(
-                eventClass: OSType(kEventClassKeyboard),
-                eventKind: UInt32(kEventHotKeyPressed)
-            )
-
-            let status = InstallEventHandler(
-                GetApplicationEventTarget(),
-                { (_, event, _) -> OSStatus in
-                    if let appDelegate = NSApp.delegate as? AppDelegate {
-                        DispatchQueue.main.async {
-                            appDelegate.toggleEnabled()
-                        }
-                    }
-                    return noErr
-                },
-                1,
-                &eventType,
-                nil,
-                &(NSApp.delegate as! AppDelegate).carbonEventHandler
-            )
-
-            if status != noErr {
-                return
-            }
-        }
-
-        let status = RegisterEventHotKey(
-            UInt32(toggleShortcut.keyCode),
-            carbonModifiers,
-            hotKeyID,
-            GetApplicationEventTarget(),
-            0,
-            &carbonHotKeyRef
-        )
-
-        if status != noErr {
-            os_log(.error, log: log, "Failed to register hotkey: %d", status)
-        }
-    }
-
-    func unregisterGlobalHotKey() {
-        if let hotKeyRef = carbonHotKeyRef {
-            UnregisterEventHotKey(hotKeyRef)
-            carbonHotKeyRef = nil
-        }
-    }
-
-    func carbonModifiersFromNSEvent(_ flags: NSEvent.ModifierFlags) -> UInt32 {
-        var carbonMods: UInt32 = 0
-        if flags.contains(.command) { carbonMods |= UInt32(cmdKey) }
-        if flags.contains(.option) { carbonMods |= UInt32(optionKey) }
-        if flags.contains(.control) { carbonMods |= UInt32(controlKey) }
-        if flags.contains(.shift) { carbonMods |= UInt32(shiftKey) }
-        return carbonMods
-    }
+    // MARK: - Global Keyboard Shortcut
 
     func updateGlobalKeyMonitor() {
-        registerGlobalHotKey()
-        updateEnabledMenuItemShortcut()
-    }
-
-    func updateEnabledMenuItemShortcut() {
-        guard let menuItem = enabledMenuItem else { return }
-
-        menuItem.title = "Enable"
-        if toggleShortcutEnabled {
-            menuItem.keyEquivalent = toggleShortcut.keyCharacter
-            menuItem.keyEquivalentModifierMask = toggleShortcut.modifiers
-        } else {
-            menuItem.keyEquivalent = ""
-            menuItem.keyEquivalentModifierMask = []
-        }
+        hotkeyManager.isEnabled = toggleShortcutEnabled
+        hotkeyManager.shortcut = toggleShortcut
+        menuBarManager.updateShortcut(enabled: toggleShortcutEnabled, shortcut: toggleShortcut)
     }
 
     // MARK: - Persistence
@@ -1066,71 +875,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Display Configuration
 
-    func getDisplayUUIDs() -> [String] {
-        var uuids: [String] = []
-
-        for screen in NSScreen.screens {
-            guard let screenNumber = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID else {
-                continue
-            }
-
-            if let uuid = CGDisplayCreateUUIDFromDisplayID(screenNumber)?.takeRetainedValue() {
-                let uuidString = CFUUIDCreateString(nil, uuid) as String
-                uuids.append(uuidString)
-            }
-        }
-
-        return uuids.sorted()
-    }
-
-    func getCurrentConfigKey() -> String {
-        let displays = getDisplayUUIDs()
-        return "displays:\(displays.joined(separator: "+"))"
-    }
-
-    func isLaptopOnlyConfiguration() -> Bool {
-        let screens = NSScreen.screens
-        if screens.count != 1 { return false }
-
-        guard let screen = screens.first,
-              let displayID = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID else {
-            return false
-        }
-
-        return CGDisplayIsBuiltin(displayID) != 0
-    }
-
-    func registerDisplayChangeCallback() {
-        let callback: CGDisplayReconfigurationCallBack = { displayID, flags, userInfo in
-            guard let userInfo = userInfo else { return }
-            let appDelegate = Unmanaged<AppDelegate>.fromOpaque(userInfo).takeUnretainedValue()
-
-            if flags.contains(.beginConfigurationFlag) {
-                return
-            }
-
-            appDelegate.scheduleDisplayConfigurationChange()
-        }
-
-        let userInfo = Unmanaged.passUnretained(self).toOpaque()
-        CGDisplayRegisterReconfigurationCallback(callback, userInfo)
-    }
-
-    func scheduleDisplayConfigurationChange() {
-        DispatchQueue.main.async { [weak self] in
-            self?.displayDebounceTimer?.invalidate()
-            self?.displayDebounceTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { [weak self] _ in
-                self?.handleDisplayConfigurationChange()
-            }
-        }
-    }
-
-    func handleDisplayConfigurationChange() {
+    private func handleDisplayConfigurationChange() {
         rebuildOverlayWindows()
 
         guard state != .disabled else { return }
 
-        if pauseOnTheGo && isLaptopOnlyConfiguration() {
+        if pauseOnTheGo && DisplayMonitor.isLaptopOnlyConfiguration() {
             state = .paused(.onTheGo)
             return
         }
@@ -1138,7 +888,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         guard trackingSource == .camera else { return }
 
         let cameras = cameraDetector.getAvailableCameras()
-        let configKey = getCurrentConfigKey()
+        let configKey = DisplayMonitor.getCurrentConfigKey()
         let profile = loadProfile(forKey: configKey)
 
         if cameras.isEmpty {

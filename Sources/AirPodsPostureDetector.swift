@@ -76,7 +76,7 @@ class AirPodsPostureDetector: NSObject, PostureDetector {
             // Start updates to trigger permission dialog
             os_log(.info, log: log, "Status notDetermined - starting motion updates to trigger dialog")
             var hasCompleted = false
-            manager.startDeviceMotionUpdates(to: .main) { [weak self] _, _ in
+            manager.startDeviceMotionUpdates(to: .main) { _, _ in
                 guard !hasCompleted else { return }
                 // Check if now authorized
                 let newStatus = CMHeadphoneMotionManager.authorizationStatus()

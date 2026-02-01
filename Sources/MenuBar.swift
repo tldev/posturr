@@ -2,17 +2,20 @@ import AppKit
 
 // MARK: - Menu Bar Manager
 
-class MenuBarManager {
-    var statusItem: NSStatusItem!
-    var statusMenuItem: NSMenuItem!
-    var enabledMenuItem: NSMenuItem!
-    var recalibrateMenuItem: NSMenuItem!
+final class MenuBarManager {
+    private(set) var statusItem: NSStatusItem!
+    private var statusMenuItem: NSMenuItem!
+    private var enabledMenuItem: NSMenuItem!
+    private var recalibrateMenuItem: NSMenuItem!
 
-    weak var appDelegate: AppDelegate?
+    // Callbacks
+    var onToggleEnabled: (() -> Void)?
+    var onRecalibrate: (() -> Void)?
+    var onShowAnalytics: (() -> Void)?
+    var onOpenSettings: (() -> Void)?
+    var onQuit: (() -> Void)?
 
-    func setup(appDelegate: AppDelegate) {
-        self.appDelegate = appDelegate
-
+    func setup() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
         if let button = statusItem.button {
@@ -29,35 +32,44 @@ class MenuBarManager {
         menu.addItem(NSMenuItem.separator())
 
         // Enabled toggle
-        enabledMenuItem = NSMenuItem(title: "Enabled", action: #selector(appDelegate.toggleEnabled), keyEquivalent: "e")
-        enabledMenuItem.target = appDelegate
+        enabledMenuItem = NSMenuItem(title: "Enable", action: #selector(handleToggleEnabled), keyEquivalent: "")
+        enabledMenuItem.target = self
         enabledMenuItem.state = .on
         menu.addItem(enabledMenuItem)
 
         // Recalibrate
-        recalibrateMenuItem = NSMenuItem(title: "Recalibrate", action: #selector(appDelegate.recalibrate), keyEquivalent: "r")
-        recalibrateMenuItem.target = appDelegate
+        recalibrateMenuItem = NSMenuItem(title: "Recalibrate", action: #selector(handleRecalibrate), keyEquivalent: "r")
+        recalibrateMenuItem.target = self
         menu.addItem(recalibrateMenuItem)
 
         menu.addItem(NSMenuItem.separator())
 
+        // Analytics
+        let statsItem = NSMenuItem(title: "Analytics", action: #selector(handleShowAnalytics), keyEquivalent: "a")
+        statsItem.target = self
+        statsItem.image = NSImage(systemSymbolName: "chart.bar.xaxis", accessibilityDescription: "Analytics")
+        menu.addItem(statsItem)
+
         // Settings
-        let settingsItem = NSMenuItem(title: "Settings...", action: #selector(appDelegate.openSettings), keyEquivalent: ",")
-        settingsItem.target = appDelegate
+        let settingsItem = NSMenuItem(title: "Settings", action: #selector(handleOpenSettings), keyEquivalent: ",")
+        settingsItem.target = self
+        settingsItem.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: "Settings")
         menu.addItem(settingsItem)
 
         menu.addItem(NSMenuItem.separator())
 
         // Quit
-        let quitItem = NSMenuItem(title: "Quit", action: #selector(appDelegate.quit), keyEquivalent: "q")
-        quitItem.target = appDelegate
+        let quitItem = NSMenuItem(title: "Quit", action: #selector(handleQuit), keyEquivalent: "q")
+        quitItem.target = self
         menu.addItem(quitItem)
 
         statusItem.menu = menu
     }
 
-    func updateStatus(title: String, icon: MenuBarIcon) {
-        statusMenuItem.title = title
+    // MARK: - Updates
+
+    func updateStatus(text: String, icon: MenuBarIcon) {
+        statusMenuItem.title = text
         statusItem.button?.image = icon.image
     }
 
@@ -65,15 +77,39 @@ class MenuBarManager {
         enabledMenuItem.state = enabled ? .on : .off
     }
 
-    func updateRecalibrateItem(hasCamera: Bool, isCalibrating: Bool) {
-        if hasCamera && !isCalibrating {
-            recalibrateMenuItem.title = "Recalibrate"
-            recalibrateMenuItem.action = #selector(appDelegate?.recalibrate)
-            recalibrateMenuItem.isEnabled = true
+    func updateRecalibrateEnabled(_ enabled: Bool) {
+        recalibrateMenuItem.isEnabled = enabled
+    }
+
+    func updateShortcut(enabled: Bool, shortcut: KeyboardShortcut) {
+        if enabled {
+            enabledMenuItem.keyEquivalent = shortcut.keyCharacter
+            enabledMenuItem.keyEquivalentModifierMask = shortcut.modifiers
         } else {
-            recalibrateMenuItem.title = hasCamera ? "Recalibrate" : "Recalibrate (no camera)"
-            recalibrateMenuItem.action = nil
-            recalibrateMenuItem.isEnabled = false
+            enabledMenuItem.keyEquivalent = ""
+            enabledMenuItem.keyEquivalentModifierMask = []
         }
+    }
+
+    // MARK: - Actions
+
+    @objc private func handleToggleEnabled() {
+        onToggleEnabled?()
+    }
+
+    @objc private func handleRecalibrate() {
+        onRecalibrate?()
+    }
+
+    @objc private func handleShowAnalytics() {
+        onShowAnalytics?()
+    }
+
+    @objc private func handleOpenSettings() {
+        onOpenSettings?()
+    }
+
+    @objc private func handleQuit() {
+        onQuit?()
     }
 }
