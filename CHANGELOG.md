@@ -5,6 +5,15 @@ All notable changes to Posturr will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.4] - 2026-02-02
+
+### Fixed
+- Settings window being cut off on first open
+- Cmd+W now properly closes Settings and Analytics windows
+
+### Changed
+- More compact Settings UI that fits better on smaller screens
+
 ## [1.5.3] - 2026-02-01
 
 ### Fixed
