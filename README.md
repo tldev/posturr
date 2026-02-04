@@ -11,6 +11,7 @@ Posturr monitors your posture in real-time using either your Mac's camera or Air
 
 **Join our Discord** to share feedback, get help, suggest features, and connect with other Posturr users!
 
+<h3 align="center">Before and After</h3>
 <p align="center">
   <img src="assets/posturr_before_and_after.jpeg" width="700" alt="Posturr in action: slouching triggers screen blur, good posture keeps it clear">
 </p>
