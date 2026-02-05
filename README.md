@@ -229,3 +229,4 @@ Want this on Linux? See [postured](https://github.com/vadi2/postured).
 - [@javabudd](https://github.com/javabudd) - Analytics dashboard
 - [@danielroek](https://github.com/danielroek) - "None" warning style option
 - [@claaslange](https://github.com/claaslange) - Camera compatibility issue with professional cameras
+- [@lucapericlp](https://github.com/lucapericlp) - Settings profiles feature
