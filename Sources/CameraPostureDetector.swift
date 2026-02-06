@@ -30,7 +30,16 @@ class CameraPostureDetector: NSObject, PostureDetector {
 
     /// Camera authorization is handled in start() - this is a no-op
     func requestAuthorization(completion: @escaping (Bool) -> Void) {
-        completion(true)
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized:
+            completion(true)
+        case .notDetermined:
+            AVCaptureDevice.requestAccess(for: .video) { granted in
+                completion(granted)
+            }
+        default:
+            completion(false)
+        }
     }
 
     var unavailableReason: String? {
