@@ -8,6 +8,7 @@
 "menu.analytics" = "Statistiques";
 "menu.settings" = "Réglages";
 "menu.quit" = "Quitter";
+"menu.checkForUpdates" = "Rechercher les mises à jour...";
 
 // MARK: - App Menu (PosturrMain.swift)
 
@@ -181,6 +182,17 @@
 "onboarding.unavailable" = "Indisponible";
 "onboarding.continue" = "Continuer";
 
+// MARK: - Update Check (AppDelegate.swift)
+
+"update.available" = "Mise à jour disponible";
+"update.availableMessage" = "Posturr %@ est disponible. Vous utilisez actuellement une version antérieure.";
+"update.download" = "Télécharger";
+"update.upToDate" = "Vous êtes à jour";
+"update.upToDateMessage" = "Posturr %@ est la dernière version.";
+"update.checkFailed" = "Échec de la vérification";
+"update.checkFailedMessage" = "Impossible de vérifier les mises à jour. Vérifiez votre connexion Internet et réessayez.";
+
 // MARK: - Common
 
 "common.cancel" = "Annuler";
+"common.ok" = "OK";

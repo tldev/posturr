@@ -475,6 +475,11 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.openSettings()
             }
         }
+        menuBarManager.onCheckForUpdates = { [weak self] in
+            Task { @MainActor in
+                self?.checkForUpdates()
+            }
+        }
         menuBarManager.onQuit = { [weak self] in
             Task { @MainActor in
                 self?.quit()
@@ -518,6 +523,99 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         cameraDetector.stop()
         airPodsDetector.stop()
         NSApplication.shared.terminate(nil)
+    }
+
+    // MARK: - Update Check
+
+    private static let appStoreID = "6758276540"
+    private static let appStoreURL = URL(string: "https://apps.apple.com/us/app/posturr-posture-monitor/id6758276540?mt=12")!
+    private static let githubReleasesURL = URL(string: "https://github.com/tldev/posturr/releases/latest")!
+
+    private func checkForUpdates() {
+        guard let lookupURL = URL(string: "https://itunes.apple.com/lookup?id=\(Self.appStoreID)") else { return }
+
+        let currentVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
+
+        let task = URLSession.shared.dataTask(with: lookupURL) { [weak self] data, _, error in
+            Task { @MainActor in
+                guard let self else { return }
+
+                if let error {
+                    os_log(.error, log: log, "Update check failed: %{public}@", error.localizedDescription)
+                    self.showUpdateError()
+                    return
+                }
+
+                guard let data,
+                      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let results = json["results"] as? [[String: Any]],
+                      let latestVersion = results.first?["version"] as? String else {
+                    os_log(.error, log: log, "Update check: failed to parse response")
+                    self.showUpdateError()
+                    return
+                }
+
+                if self.isVersion(latestVersion, newerThan: currentVersion) {
+                    self.showUpdateAvailable(latestVersion: latestVersion)
+                } else {
+                    self.showUpToDate()
+                }
+            }
+        }
+        task.resume()
+    }
+
+    /// Semantic version comparison: returns true if `a` is newer than `b`
+    private func isVersion(_ a: String, newerThan b: String) -> Bool {
+        let partsA = a.split(separator: ".").compactMap { Int($0) }
+        let partsB = b.split(separator: ".").compactMap { Int($0) }
+        let count = max(partsA.count, partsB.count)
+        for i in 0..<count {
+            let va = i < partsA.count ? partsA[i] : 0
+            let vb = i < partsB.count ? partsB[i] : 0
+            if va != vb { return va > vb }
+        }
+        return false
+    }
+
+    private func showUpdateAvailable(latestVersion: String) {
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = L("update.available")
+        alert.informativeText = L("update.availableMessage", latestVersion)
+        alert.addButton(withTitle: L("update.download"))
+        alert.addButton(withTitle: L("common.cancel"))
+
+        if alert.runModal() == .alertFirstButtonReturn {
+            #if APP_STORE
+            let url = Self.appStoreURL
+            #else
+            let url = Self.githubReleasesURL
+            #endif
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    private func showUpToDate() {
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = L("update.upToDate")
+        let currentVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
+        alert.informativeText = L("update.upToDateMessage", currentVersion)
+        alert.addButton(withTitle: L("common.ok"))
+        alert.runModal()
+    }
+
+    private func showUpdateError() {
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = L("update.checkFailed")
+        alert.informativeText = L("update.checkFailedMessage")
+        alert.addButton(withTitle: L("common.ok"))
+        alert.runModal()
     }
 
     // MARK: - Initial Setup Flow

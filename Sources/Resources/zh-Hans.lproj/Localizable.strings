@@ -8,6 +8,7 @@
 "menu.analytics" = "统计";
 "menu.settings" = "设置";
 "menu.quit" = "退出";
+"menu.checkForUpdates" = "检查更新...";
 
 // MARK: - App Menu (PosturrMain.swift)
 
@@ -181,6 +182,17 @@
 "onboarding.unavailable" = "不可用";
 "onboarding.continue" = "继续";
 
+// MARK: - Update Check (AppDelegate.swift)
+
+"update.available" = "有可用更新";
+"update.availableMessage" = "Posturr %@ 已发布。您当前使用的是旧版本。";
+"update.download" = "下载";
+"update.upToDate" = "已是最新版本";
+"update.upToDateMessage" = "Posturr %@ 是最新版本。";
+"update.checkFailed" = "检查更新失败";
+"update.checkFailedMessage" = "无法检查更新。请检查您的网络连接后重试。";
+
 // MARK: - Common
 
 "common.cancel" = "取消";
+"common.ok" = "好";

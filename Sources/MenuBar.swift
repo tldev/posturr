@@ -14,6 +14,7 @@ final class MenuBarManager {
     var onRecalibrate: (() -> Void)?
     var onShowAnalytics: (() -> Void)?
     var onOpenSettings: (() -> Void)?
+    var onCheckForUpdates: (() -> Void)?
     var onQuit: (() -> Void)?
 
     func setup() {
@@ -56,6 +57,12 @@ final class MenuBarManager {
         settingsItem.target = self
         settingsItem.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: L("menu.settings"))
         menu.addItem(settingsItem)
+
+        // Check for Updates
+        let updateItem = NSMenuItem(title: L("menu.checkForUpdates"), action: #selector(handleCheckForUpdates), keyEquivalent: "")
+        updateItem.target = self
+        updateItem.image = NSImage(systemSymbolName: "arrow.triangle.2.circlepath", accessibilityDescription: L("menu.checkForUpdates"))
+        menu.addItem(updateItem)
 
         menu.addItem(NSMenuItem.separator())
 
@@ -108,6 +115,10 @@ final class MenuBarManager {
 
     @objc private func handleOpenSettings() {
         onOpenSettings?()
+    }
+
+    @objc private func handleCheckForUpdates() {
+        onCheckForUpdates?()
     }
 
     @objc private func handleQuit() {
