@@ -9,6 +9,7 @@ class CalibrationView: NSView {
     var stepText: String = L("calibration.stepOf", 1, 4)
     var showRing: Bool = true
     var waitingForAirPods: Bool = false
+    private var keycapSegmentCache: [String: [(text: String, isKeycap: Bool)]] = [:]
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
@@ -118,25 +119,7 @@ class CalibrationView: NSView {
         let keycapPaddingH: CGFloat = 8
         let keycapPaddingV: CGFloat = 4
 
-        // Parse format string: "Tap {Space} while looking at the ring"
-        // into segments: [("Tap ", false), ("Space", true), (" while looking at the ring", false)]
-        var segments: [(text: String, isKeycap: Bool)] = []
-        var remaining = text
-        while let openBrace = remaining.range(of: "{") {
-            let prefix = String(remaining[remaining.startIndex..<openBrace.lowerBound])
-            if !prefix.isEmpty {
-                segments.append((prefix, false))
-            }
-            remaining = String(remaining[openBrace.upperBound...])
-            if let closeBrace = remaining.range(of: "}") {
-                let keycap = String(remaining[remaining.startIndex..<closeBrace.lowerBound])
-                segments.append((keycap, true))
-                remaining = String(remaining[closeBrace.upperBound...])
-            }
-        }
-        if !remaining.isEmpty {
-            segments.append((remaining, false))
-        }
+        let segments = keycapSegments(for: text)
 
         // Calculate total width
         var totalWidth: CGFloat = 0
@@ -179,6 +162,37 @@ class CalibrationView: NSView {
                 currentX += (segment.text as NSString).size(withAttributes: textAttrs).width
             }
         }
+    }
+
+    private func keycapSegments(for text: String) -> [(text: String, isKeycap: Bool)] {
+        if let cached = keycapSegmentCache[text] {
+            return cached
+        }
+
+        var segments: [(text: String, isKeycap: Bool)] = []
+        var remaining = text
+        while let openBrace = remaining.range(of: "{") {
+            let prefix = String(remaining[..<openBrace.lowerBound])
+            if !prefix.isEmpty {
+                segments.append((prefix, false))
+            }
+            remaining = String(remaining[openBrace.upperBound...])
+            if let closeBrace = remaining.range(of: "}") {
+                let keycap = String(remaining[..<closeBrace.lowerBound])
+                segments.append((keycap, true))
+                remaining = String(remaining[closeBrace.upperBound...])
+            } else {
+                segments.append(("{\(remaining)", false))
+                remaining = ""
+                break
+            }
+        }
+        if !remaining.isEmpty {
+            segments.append((remaining, false))
+        }
+
+        keycapSegmentCache[text] = segments
+        return segments
     }
 
     private func drawWaitingForAirPods() {

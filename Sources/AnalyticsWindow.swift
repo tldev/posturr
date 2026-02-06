@@ -60,7 +60,7 @@ struct AnalyticsView: View {
                         Text(L("analytics.todayScore"))
                             .font(.system(size: 12, weight: .medium))
                             .foregroundColor(.secondary)
-                        Text(String(format: "%.0f%%", manager.todayStats.postureScore))
+                        Text(formatPercent(manager.todayStats.postureScore))
                             .font(.system(size: 20, weight: .bold))
                             .foregroundColor(scoreColor(manager.todayStats.postureScore))
                     }
@@ -189,6 +189,19 @@ struct AnalyticsView: View {
         f.allowedUnits = [.second]
         return f
     }()
+
+    private static let percentFormatter: NumberFormatter = {
+        let f = NumberFormatter()
+        f.numberStyle = .percent
+        f.maximumFractionDigits = 0
+        f.minimumFractionDigits = 0
+        f.locale = Locale.autoupdatingCurrent
+        return f
+    }()
+
+    private func formatPercent(_ score: Double) -> String {
+        Self.percentFormatter.string(from: NSNumber(value: score / 100)) ?? "\(Int(round(score)))%"
+    }
 
     func formatDuration(_ seconds: TimeInterval) -> String {
         let formatter: DateComponentsFormatter
