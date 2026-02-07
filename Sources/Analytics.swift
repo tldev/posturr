@@ -213,6 +213,30 @@ class AnalyticsManager: ObservableObject {
         }
     }
 
+    func injectMarketingData() {
+        let now = now()
+        let dataPoints: [(daysAgo: Int, score: Double, slouchCount: Int)] = [
+            (6, 72, 18),
+            (5, 76, 15),
+            (4, 81, 12),
+            (3, 85, 9),
+            (2, 89, 6),
+            (1, 93, 4),
+            (0, 96, 2),
+        ]
+        for point in dataPoints {
+            guard let date = calendar.date(byAdding: .day, value: -point.daysAgo, to: now) else { continue }
+            let totalSeconds: TimeInterval = 21600 // 6 hours
+            let slouchSeconds = totalSeconds * (1.0 - point.score / 100.0)
+            let key = DailyStats.dayKey(for: date, calendar: calendar)
+            let stats = DailyStats(date: date, totalSeconds: totalSeconds, slouchSeconds: slouchSeconds, slouchCount: point.slouchCount)
+            history[key] = stats
+            if point.daysAgo == 0 { todayStats = stats }
+        }
+        saveHistory()
+        Self.logger.info("Marketing mode: injected 7 days of demo analytics data")
+    }
+
     private func loadHistory() {
         do {
             guard FileManager.default.fileExists(atPath: fileURL.path) else { return }

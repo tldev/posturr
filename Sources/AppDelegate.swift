@@ -75,7 +75,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     // Calibration
     var calibrationController: CalibrationWindowController?
     var isCalibrated: Bool {
-        currentCalibration?.isValid ?? false
+        isMarketingMode || (currentCalibration?.isValid ?? false)
     }
 
     // Settings
@@ -158,6 +158,11 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     var setupComplete = false
+
+    var isMarketingMode: Bool {
+        UserDefaults.standard.bool(forKey: "MarketingMode")
+            || CommandLine.arguments.contains("--marketing-mode")
+    }
 
     // MARK: - State Machine
 
@@ -277,6 +282,10 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
+        if isMarketingMode {
+            AnalyticsManager.shared.injectMarketingData()
+        }
+
         initialSetupFlow()
     }
 
@@ -344,6 +353,15 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     private func handlePostureReading(_ reading: PostureReading) {
         guard state == .monitoring else { return }
 
+        if isMarketingMode {
+            monitoringState.isCurrentlySlouching = false
+            monitoringState.postureWarningIntensity = 0
+            monitoringState.consecutiveBadFrames = 0
+            syncUIToState()
+            updateBlur()
+            return
+        }
+
         // Use the detector's capture timestamp for consistency
         let readingTime = reading.timestamp
 
@@ -391,6 +409,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func handleAwayStateChange(_ isAway: Bool) {
         guard state == .monitoring else { return }
+        if isMarketingMode { return }
 
         let result = PostureEngine.processAwayChange(isAway: isAway, state: monitoringState)
         monitoringState = result.newState
@@ -526,6 +545,11 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         guard !setupComplete else { return }
         setupComplete = true
 
+        if isMarketingMode {
+            startMonitoring()
+            return
+        }
+
         // Check if we have existing calibration
         let configKey = DisplayMonitor.getCurrentConfigKey()
 
@@ -588,7 +612,6 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Check if calibration exists for the new source
         if isCalibrated {
-            // Existing calibration - start monitoring (will pause if AirPods not connected)
             startMonitoring()
         } else {
             // No calibration - pause and wait for user to calibrate
@@ -734,6 +757,11 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func startMonitoring() {
+        if isMarketingMode {
+            state = .monitoring
+            return
+        }
+
         guard let calibration = currentCalibration else {
             state = .paused(.noProfile)
             return
