@@ -889,16 +889,17 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         guard case .paused(.screenLocked) = state else { return }
 
         if let previousState = stateBeforeLock {
-            state = previousState
             stateBeforeLock = nil
+            switch previousState {
+            case .monitoring:
+                // Re-enter monitoring via startMonitoring() so detector monitoring
+                // state and calibration are re-applied after the pause stopped them.
+                startMonitoring()
+            default:
+                state = previousState
+            }
         } else {
             startMonitoring()
-        }
-
-        // Rebuild the camera session to recover from stale AV capture pipelines
-        // that occur after sleep/wake cycles.
-        if trackingSource == .camera, state == .monitoring {
-            cameraDetector.restartSession()
         }
     }
 

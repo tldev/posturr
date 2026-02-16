@@ -318,28 +318,6 @@ class CameraPostureDetector: NSObject, PostureDetector {
         }
     }
 
-    /// Tear down and rebuild the capture session to recover from stale camera pipelines
-    /// (e.g. after sleep/wake). Preserves monitoring and calibration state.
-    func restartSession() {
-        guard AVCaptureDevice.authorizationStatus(for: .video) == .authorized else { return }
-
-        os_log(.info, log: log, "Restarting camera session")
-
-        if let session = captureSession {
-            session.stopRunning()
-            for input in session.inputs { session.removeInput(input) }
-            for output in session.outputs { session.removeOutput(output) }
-        }
-
-        videoOutput = nil
-        captureSession = nil
-        isActive = false
-        isStarting = true
-
-        setupCamera()
-        startSession()
-    }
-
     func switchCamera(to cameraID: String) {
         guard let session = captureSession else { return }
 
