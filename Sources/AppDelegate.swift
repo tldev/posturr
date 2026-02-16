@@ -459,28 +459,6 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         }
         screenLockObserver.startObserving()
 
-        // System sleep/wake
-        let workspaceNotificationCenter = NSWorkspace.shared.notificationCenter
-        workspaceNotificationCenter.addObserver(
-            forName: NSWorkspace.screensDidSleepNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor in
-                self?.handleScreenLocked()
-            }
-        }
-
-        workspaceNotificationCenter.addObserver(
-            forName: NSWorkspace.screensDidWakeNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor in
-                self?.handleScreenUnlocked(triggeredByUnlockNotification: false)
-            }
-        }
-
         // Global hotkey
         hotkeyManager.configure(
             enabled: toggleShortcutEnabled,
