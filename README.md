@@ -232,3 +232,4 @@ Want this on Linux? See [postured](https://github.com/vadi2/postured).
 - [@danielroek](https://github.com/danielroek) - "None" warning style option
 - [@claaslange](https://github.com/claaslange) - Camera compatibility issue with professional cameras
 - [@lucapericlp](https://github.com/lucapericlp) - Settings profiles feature
+- [@DengNaichen](https://github.com/DengNaichen) - Sleep/wake camera detection fix
