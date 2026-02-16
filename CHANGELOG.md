@@ -5,6 +5,18 @@ All notable changes to Dorso will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.0] - 2026-02-16
+
+### Changed
+- Rebranded from Posturr to Dorso — new name, same app. All settings and data carry over automatically.
+
+### Fixed
+- Camera detection now reliably resumes after screen sleep, screen saver, or screen lock
+- Camera session startup now verifies the session is actually running and logs errors on failure
+
+### Acknowledgments
+- Thanks to [@DengNaichen](https://github.com/DengNaichen) for fixing the sleep/wake detection issue in [PR #63](https://github.com/tldev/posturr/pull/63)
+
 ## [1.8.2] - 2026-02-12
 
 ### Changed
