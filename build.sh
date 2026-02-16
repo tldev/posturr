@@ -13,8 +13,8 @@ set -e
 # Configuration
 APP_NAME="Dorso"
 BUNDLE_ID="com.thelazydeveloper.posturr"
-VERSION="1.8.2"
-BUILD_NUMBER="5"
+VERSION="1.9.0"
+BUILD_NUMBER="1"
 MIN_MACOS="13.0"
 
 # Check for App Store build flag
